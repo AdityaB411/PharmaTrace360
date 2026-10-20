@@ -1,0 +1,35 @@
+# PharmaTrace 360 — .gitignore
+
+# Raw Kaggle CSVs — never commit (large files, data/raw policy in docs/CONTEXT.md)
+data/raw/
+
+# Any stray large CSV anywhere in the repo (>50 MB threshold — tracked via Git LFS
+# or excluded entirely; list common large-file extensions)
+*.csv
+
+# But DO track the clean output CSV (small, reproducible)
+!data/clean/*.csv
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Secrets & local config - NEVER commit credentials
+.env
+*.env
+config.local.php
+web/config.local.php
+
+# Web logs
+web/logs/
+*.log
+
+# Database backups
+db/backup/
+*.sql.gz
