@@ -8,13 +8,15 @@ is also documented in docs/data_overrides.md with its reason.
 """
 
 import csv, json, re, os, sys, io
+from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-AZ  = r'E:\DBMS\PharmaTrace360\data\raw\Extensive_A_Z_medicines_dataset_of_India.csv'
-MD  = r'E:\DBMS\PharmaTrace360\data\raw\medicine_data.csv'
-OUT = r'E:\DBMS\PharmaTrace360\data\clean\medicines_15.csv'
-os.makedirs(os.path.dirname(OUT), exist_ok=True)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+AZ  = PROJECT_ROOT / 'data' / 'raw' / 'Extensive_A_Z_medicines_dataset_of_India.csv'
+MD  = PROJECT_ROOT / 'data' / 'raw' / 'medicine_data.csv'
+OUT = PROJECT_ROOT / 'data' / 'clean' / 'medicines_15.csv'
+os.makedirs(OUT.parent, exist_ok=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # OVERRIDES — all hand-supplied values that are NOT taken directly from the
@@ -235,12 +237,15 @@ output_rows = []
 interaction_sources = []
 empty_fields_report = []
 
+missing_targets = [salt_name for salt_name, _, _ in TARGETS if chosen.get(salt_name.lower()) is None]
+if missing_targets:
+    raise SystemExit('Cannot build a complete dataset; missing medicine targets: ' + ', '.join(missing_targets))
+
 for (salt_name, _, _) in TARGETS:
     salt_lower = salt_name.lower()
     az = chosen.get(salt_lower)
     if az is None:
-        print(f"  SKIP {salt_name}")
-        continue
+        raise RuntimeError(f"Unexpected missing medicine target after validation: {salt_name}")
 
     ing1, str1 = parse_strength(norm(az['short_composition1']))
     uses = flatten_uses(az)

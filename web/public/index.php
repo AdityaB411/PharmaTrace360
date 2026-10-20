@@ -11,9 +11,16 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/db.php';
 
-$code = trim($_GET['code'] ?? $_POST['code'] ?? '');
+$rawCode = $_GET['code'] ?? $_POST['code'] ?? '';
+$code = is_string($rawCode) ? trim($rawCode) : '';
 $scanResult = null;
 $errorMessage = null;
+if (!is_string($rawCode)) {
+    $errorMessage = 'Please enter a valid QR code.';
+} elseif (strlen($code) > 64) {
+    $code = '';
+    $errorMessage = 'QR codes must be 64 characters or fewer.';
+}
 $demoCodes = [];
 $demoModeActive = false;
 
@@ -299,7 +306,7 @@ if ($scanResult !== null) {
                     </p>
                     <?php if (isset($scanResult['scan_count']) && $scanResult['scan_count'] !== null): ?>
                         <p class="mb-0 small mt-2 fw-semibold">
-                            Checked <?= (int)$scanResult['scan_count'] ?> times before
+                            Total scans recorded: <?= (int)$scanResult['scan_count'] ?>
                         </p>
                     <?php endif; ?>
                 </div>

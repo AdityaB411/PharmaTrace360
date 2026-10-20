@@ -44,7 +44,7 @@ GRANT EXECUTE ON PROCEDURE pharmatrace360.sp_reject_batch       TO 'pt_app'@'loc
 GRANT EXECUTE ON PROCEDURE pharmatrace360.sp_issue_recall       TO 'pt_app'@'localhost';
 GRANT EXECUTE ON PROCEDURE pharmatrace360.sp_log_event          TO 'pt_app'@'localhost';
 GRANT EXECUTE ON PROCEDURE pharmatrace360.sp_login_lookup       TO 'pt_app'@'localhost';
-GRANT EXECUTE ON PROCEDURE pharmatrace360.sp_set_password       TO 'pt_app'@'localhost';
+GRANT EXECUTE ON PROCEDURE pharmatrace360.sp_session_lookup     TO 'pt_app'@'localhost';
 GRANT EXECUTE ON PROCEDURE pharmatrace360.sp_record_delivery    TO 'pt_app'@'localhost';
 GRANT EXECUTE ON PROCEDURE pharmatrace360.sp_create_batch        TO 'pt_app'@'localhost';
 GRANT EXECUTE ON PROCEDURE pharmatrace360.sp_add_batch_material  TO 'pt_app'@'localhost';

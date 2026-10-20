@@ -134,6 +134,7 @@ CREATE TABLE Material_Deliveries (
     received_date        DATE          NOT NULL,
     certificate_number   VARCHAR(60),
     PRIMARY KEY (delivery_id),
+    UNIQUE KEY uq_delivery_certificate (certificate_number),
     CONSTRAINT chk_delivery_qty CHECK (quantity_kg > 0),
     CONSTRAINT fk_delivery_supplier
         FOREIGN KEY (supplier_id)
@@ -263,7 +264,7 @@ CREATE TABLE Batch_Materials (
     CONSTRAINT fk_bm_batch
         FOREIGN KEY (batch_id)
         REFERENCES Production_Batches (batch_id)
-        ON DELETE CASCADE
+        ON DELETE RESTRICT
         ON UPDATE CASCADE,
     CONSTRAINT fk_bm_delivery
         FOREIGN KEY (delivery_id)
@@ -288,13 +289,14 @@ CREATE TABLE Quality_Test_Reports (
     result               ENUM('Pass','Fail') NOT NULL,
     remarks              TEXT,
     PRIMARY KEY (report_id),
+    KEY idx_qtr_batch_latest (batch_id, test_date, report_id),
     CONSTRAINT chk_purity       CHECK (purity_pct       IS NULL OR purity_pct       BETWEEN 0 AND 100),
     CONSTRAINT chk_dissolution  CHECK (dissolution_pct  IS NULL OR dissolution_pct  BETWEEN 0 AND 100),
     CONSTRAINT chk_weight_var   CHECK (weight_variation_pct IS NULL OR weight_variation_pct BETWEEN 0 AND 100),
     CONSTRAINT fk_qtr_batch
         FOREIGN KEY (batch_id)
         REFERENCES Production_Batches (batch_id)
-        ON DELETE CASCADE
+        ON DELETE RESTRICT
         ON UPDATE CASCADE,
     CONSTRAINT fk_qtr_user
         FOREIGN KEY (tested_by)
@@ -361,6 +363,7 @@ CREATE TABLE Product_Recalls (
     batch_id    INT          UNSIGNED NOT NULL,
     reason      TEXT         NOT NULL,
     recall_date DATE         NOT NULL,
+    issued_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     issued_by   INT          UNSIGNED NOT NULL,   -- user_id
     PRIMARY KEY (recall_id),
     UNIQUE KEY uq_recall_batch (batch_id),

@@ -142,6 +142,7 @@ erDiagram
         INT batch_id FK
         TEXT reason
         DATE recall_date
+        DATETIME issued_at
         INT issued_by FK
     }
 

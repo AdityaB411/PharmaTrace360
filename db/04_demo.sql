@@ -140,7 +140,7 @@ BEGIN
         SELECT CONCAT('EXPECTED ERROR: ', v_msg) AS error_result;
     END;
     CALL sp_approve_batch('BT-2026-009',
-        (SELECT user_id FROM Users WHERE email = 'priya.admin@demo.test'), 5);
+        (SELECT user_id FROM Users WHERE email = 'vikram.mfr@demo.test'), 5);
 END //
 DELIMITER ;
 
@@ -161,7 +161,7 @@ VALUES (
 -- 3d. Approve BT-2026-009 with 5 packs - MUST SUCCEED and create 5 QR codes
 SELECT '--- Step 3d: sp_approve_batch on BT-2026-009 (should SUCCEED) ---' AS step;
 CALL sp_approve_batch('BT-2026-009',
-    (SELECT user_id FROM Users WHERE email = 'priya.admin@demo.test'), 5);
+    (SELECT user_id FROM Users WHERE email = 'vikram.mfr@demo.test'), 5);
 
 -- Verify 5 QR codes were created
 SELECT '--- Verify: QR codes for BT-2026-009 ---' AS step;

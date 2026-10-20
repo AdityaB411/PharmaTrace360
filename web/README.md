@@ -7,7 +7,7 @@ This directory contains the PHP web frontend for **PharmaTrace 360**.
 ## 1. Initial Setup
 
 ### Step 1: Create your local configuration file
-Copy the sample configuration file [web/config.sample.php](file:///e:/DBMS/PharmaTrace360/web/config.sample.php) to `web/config.local.php`:
+Copy the sample configuration file [web/config.sample.php](config.sample.php) to `web/config.local.php`:
 
 ```cmd
 copy web\config.sample.php web\config.local.php
@@ -17,7 +17,8 @@ copy web\config.sample.php web\config.local.php
 Open `web/config.local.php` in your text editor and update your database credentials.
 The application uses two least-privilege database connections:
 - `public`: Uses MySQL user `pt_public` (only can call `sp_verify_scan` and read `v_demo_codes`).
-- `app`: Uses MySQL user `pt_app` (can execute business stored procedures and read views, zero table access).
+- `app`: Uses MySQL user `pt_app` (business procedures and views only).
+- `setup`: Uses MySQL user `pt_setup` for the CLI-only password bootstrap tool; it must not be used by web pages.
 
 ```php
 return [
@@ -38,6 +39,12 @@ return [
             'user'     => 'pt_app',
             'password' => 'YOUR_PT_APP_PASSWORD',
         ],
+
+        // pt_setup: CLI-only password setup
+        'setup' => [
+            'user'     => 'pt_setup',
+            'password' => 'YOUR_PT_SETUP_PASSWORD',
+        ],
     ],
     // Set to true to display sample QR codes on the public portal
     'DEMO_MODE' => true,
@@ -45,10 +52,13 @@ return [
 ```
 
 > [!NOTE]
-> `web/config.local.php` and `web/logs/` are ignored by git in `.gitignore`. Your credentials and error logs will never be committed.
+> `web/config.local.php` and `web/logs/` are ignored by Git. Keep all real credentials in the local config only.
 
-### Step 3: Set passwords for demo users
-Seed data creates demo users without active passwords. Use the CLI tool [web/tools/set_password.php](file:///e:/DBMS/PharmaTrace360/web/tools/set_password.php) to set passwords:
+### Step 3: Grant the CLI-only setup account
+After creating `pt_setup` in MySQL, run `mysql -u root -p < db\\10_setup_grants.sql` from the repository root. The script grants only `EXECUTE` on the password bootstrap procedure.
+
+### Step 4: Set passwords for demo users
+Seed data creates demo users without active passwords. Use the CLI tool [web/tools/set_password.php](tools/set_password.php) to set passwords:
 
 ```cmd
 php web\tools\set_password.php

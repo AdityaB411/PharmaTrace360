@@ -691,17 +691,17 @@ pageHeader('Batch ' . $batchNumber, 'Batch ' . $batchNumber . ' Details');
                             '<polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>',
                             'QR Codes Issued',
                         ],
-                        str_starts_with($evtType, 'STATUS_Recalled') || $evtType === 'RECALL_ISSUED' => [
+                        str_starts_with($evtType, 'STATUS_RECALLED') || $evtType === 'RECALL_ISSUED' => [
                             'bg-danger',
                             '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
                             'Recall',
                         ],
-                        str_starts_with($evtType, 'STATUS_Approved') => [
+                        str_starts_with($evtType, 'STATUS_APPROVED') => [
                             'bg-success',
                             '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
                             'Approved',
                         ],
-                        str_starts_with($evtType, 'STATUS_Rejected') => [
+                        str_starts_with($evtType, 'STATUS_REJECTED') => [
                             'bg-dark',
                             '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>',
                             'Rejected',

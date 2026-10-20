@@ -1,0 +1,64 @@
+name: PharmaTrace360 CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  php-python-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: pdo_mysql
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Lint PHP files
+        run: |
+          find web -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Compile Python files
+        run: python -m compileall -q db data/clean
+
+  mysql-bootstrap:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create least-privilege accounts for schema bootstrap
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot -e "CREATE USER 'pt_public'@'localhost' IDENTIFIED BY 'ci-public-password'; CREATE USER 'pt_app'@'localhost' IDENTIFIED BY 'ci-app-password';"
+      - name: Run fresh database setup
+        run: mysql -h 127.0.0.1 -uroot -proot < db/00_reset_all.sql
+      - name: Verify installed schema and routines
+        run: |
+          test "$(mysql -h 127.0.0.1 -uroot -proot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='pharmatrace360' AND table_type='BASE TABLE'")" -ge 17
+          test "$(mysql -h 127.0.0.1 -uroot -proot -N -e "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema='pharmatrace360' AND routine_name IN ('sp_verify_scan','sp_session_lookup','sp_approve_batch','sp_update_suspicious_review')")" -eq 4
+          mysql -h 127.0.0.1 -uroot -proot -e "USE pharmatrace360; CALL sp_verify_scan('CI-UNKNOWN-CODE');"
+      - name: Verify non-destructive upgrade and repeatable migration
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot < db/09_upgrade_existing.sql
+          mysql -h 127.0.0.1 -uroot -proot < db/06_suspicious_review.sql
+          mysql -h 127.0.0.1 -uroot -proot < db/06_suspicious_review.sql
+          test "$(mysql -h 127.0.0.1 -uroot -proot -N -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='pharmatrace360' AND table_name='Scan_Log' AND column_name='review_status'")" -eq 1
+      - name: Run database feature regression suite
+        run: |
+          mysql -f -h 127.0.0.1 -uroot -proot < db/08_feature_tests.sql > /tmp/feature-tests.log 2>&1
+          grep -q "ALL PHARMATRACE 360 FEATURE TESTS COMPLETED" /tmp/feature-tests.log
+          grep -q "Total quantity used exceeds the delivered quantity" /tmp/feature-tests.log
+          grep -q "Password hash is too short" /tmp/feature-tests.log

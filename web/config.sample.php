@@ -5,9 +5,10 @@
  * Copy this file to web/config.local.php and enter your local MySQL credentials.
  * DO NOT commit web/config.local.php to version control.
  *
- * Two database connections are used:
+ * Three database connections are used:
  *   - 'public': pt_public user — can only call sp_verify_scan and read v_demo_codes.
  *   - 'app':    pt_app user    — can call business procedures and read views.
+ *   - 'setup':  pt_setup user  — CLI-only password setup procedure; never use in the web app.
  */
 
 return [
@@ -27,6 +28,12 @@ return [
         'app' => [
             'user'     => 'pt_app',
             'password' => '', // Set your pt_app password here
+        ],
+
+        // CLI-only account for initial/reset password setup
+        'setup' => [
+            'user'     => 'pt_setup',
+            'password' => '', // Set your pt_setup password here
         ],
     ],
     // When true, displays sample QR codes on the scan page for demonstration

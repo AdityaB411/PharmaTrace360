@@ -124,7 +124,7 @@ Scan_Log(scan_id PK, scanned_code VARCHAR(64),
 ```
 Product_Recalls(recall_id PK,
                 batch_id UNIQUE FK -> Production_Batches.batch_id,
-                reason, recall_date,
+                reason, recall_date, issued_at,
                 issued_by FK -> Users.user_id)
 ```
 

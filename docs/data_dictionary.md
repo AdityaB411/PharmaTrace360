@@ -86,7 +86,7 @@
 | manufacturer_id | INT UNSIGNED | No | FK `fk_delivery_mfr` | ON DELETE RESTRICT, ON UPDATE CASCADE | The manufacturer who received the delivery. |
 | quantity_kg | DECIMAL(10,3) | No | | CK `chk_delivery_qty` (>0) | Net weight of the delivery in kilograms. |
 | received_date | DATE | No | | | Date the delivery was accepted at the factory. |
-| certificate_number | VARCHAR(60) | Yes | | Uniqueness enforced by `sp_record_delivery` only | Certificate of Analysis (CoA) document number. |
+| certificate_number | VARCHAR(60) | Yes | UQ `uq_delivery_certificate` | Unique when non-NULL; delivery procedure also rejects blank values | Certificate of Analysis (CoA) document number. |
 
 ---
 
@@ -147,7 +147,7 @@
 
 | Column | Data Type | Nullable | Key | Constraint | Meaning |
 |---|---|---|---|---|---|
-| batch_id | INT UNSIGNED | No | PK, FK `fk_bm_batch` | ON DELETE CASCADE, ON UPDATE CASCADE | The batch that consumed this material. |
+| batch_id | INT UNSIGNED | No | PK, FK `fk_bm_batch` | ON DELETE RESTRICT, ON UPDATE CASCADE | The batch that consumed this material. |
 | delivery_id | INT UNSIGNED | No | PK, FK `fk_bm_delivery` | ON DELETE RESTRICT, ON UPDATE CASCADE | The delivery from which the material was drawn. |
 | quantity_used_kg | DECIMAL(10,3) | No | | CK `chk_bm_qty` (>0) | Mass consumed from this delivery for this batch. Total must not exceed delivery quantity (enforced by `trg_batch_materials_bi`). |
 
@@ -158,7 +158,7 @@
 | Column | Data Type | Nullable | Key | Constraint | Meaning |
 |---|---|---|---|---|---|
 | report_id | INT UNSIGNED | No | PK, AUTO_INCREMENT | | Surrogate key for one QA test report. |
-| batch_id | INT UNSIGNED | No | FK `fk_qtr_batch` | ON DELETE CASCADE, ON UPDATE CASCADE | The batch that was tested. |
+| batch_id | INT UNSIGNED | No | FK `fk_qtr_batch` | ON DELETE RESTRICT, ON UPDATE CASCADE | The batch that was tested. |
 | tested_by | INT UNSIGNED | No | FK `fk_qtr_user` | ON DELETE RESTRICT, ON UPDATE CASCADE | The user (staff member) who recorded the test. |
 | test_date | DATE | No | | | Date the test was performed. |
 | purity_pct | DECIMAL(5,2) | Yes | | CK `chk_purity` (0-100 or NULL) | Active ingredient purity percentage. |
@@ -199,7 +199,7 @@
 | recall_id | INT UNSIGNED | No | PK, AUTO_INCREMENT | | Surrogate key for a recall event. |
 | batch_id | INT UNSIGNED | No | UQ `uq_recall_batch`, FK `fk_recall_batch` | ON DELETE RESTRICT, ON UPDATE CASCADE | The recalled batch (one recall per batch maximum). |
 | reason | TEXT | No | | | Official reason for the recall. |
-| recall_date | DATE | No | | | Date the recall was issued. |
+| recall_date | DATE | No | | | Calendar date the recall was issued. |\n| issued_at | DATETIME | No | | DEFAULT CURRENT_TIMESTAMP | Timestamp when the recall was issued; used for post-recall scan counts and timeline ordering. |
 | issued_by | INT UNSIGNED | No | FK `fk_recall_user` | ON DELETE RESTRICT, ON UPDATE CASCADE | The Admin/Regulator user who issued the recall. |
 
 ---

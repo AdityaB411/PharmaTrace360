@@ -104,7 +104,7 @@ pageHeader('Suspicious Scans', 'Suspicious QR Code Alerts');
             <div>
                 <h5 class="card-title fw-bold mb-1">Cloned / High-Frequency Scans</h5>
                 <p class="text-muted small mb-0">
-                    Codes scanned more than 5 times suggest photocopied packaging or duplicate QR distribution. Admin/Regulator review statuses allow triage without altering public verification verdicts.
+                    Codes scanned more than 10 times within 48 hours may indicate photocopied packaging or duplicate QR distribution. Admin/Regulator review statuses allow triage without altering public verification verdicts.
                 </p>
             </div>
             <span class="badge bg-danger px-3 py-2"><?= count($suspicious) ?> Flagged Codes</span>
@@ -112,7 +112,7 @@ pageHeader('Suspicious Scans', 'Suspicious QR Code Alerts');
 
         <?php if (empty($suspicious)): ?>
             <div class="alert alert-success mb-0">
-                <strong>No suspicious scans detected.</strong> All scanned QR codes are within normal velocity limits (&le; 5 scans).
+                <strong>No suspicious scans detected.</strong> All scanned QR codes are within the configured velocity threshold (10 or fewer scans in 48 hours).
             </div>
         <?php else: ?>
             <div class="table-responsive">

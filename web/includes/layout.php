@@ -56,7 +56,10 @@ function pageHeader(string $title, string $pageTitle = ''): void
                 <a href="/app/change_password.php" class="text-white-50 text-decoration-none small">Change password</a>
                 <span class="badge rounded-pill bg-light text-dark px-3 py-2 fw-medium"><?= $role ?></span>
                 <span class="text-white-50 small"><?= $name ?></span>
-                <a href="/logout.php" class="btn btn-outline-light btn-sm">Logout</a>
+                <form method="POST" action="/logout.php" class="m-0">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrfToken()) ?>">
+                    <button type="submit" class="btn btn-outline-light btn-sm">Logout</button>
+                </form>
             </nav>
         </div>
     </header>

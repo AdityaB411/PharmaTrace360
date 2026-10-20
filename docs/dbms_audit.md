@@ -222,15 +222,15 @@ signals "Delivery received date cannot be after the batch manufacture date." [03
 
 ## Prioritised Suggested Fixes
 
-> Recommendations only. **No changes are applied in this file.**
+> This audit contains the original recommendations. The maintenance branch has implemented the items marked **Done**; remaining items require separate domain/security decisions.
 
 | Priority | Fix | Rationale |
 |---|---|---|
-| **P1 — High** | Add composite index `(batch_id, test_date, report_id)` on `Quality_Test_Reports` | Eliminates full-batch scan on every approval/rejection in `trg_batches_bu` and `sp_reject_batch`. |
-| **P2 — High** | Add UNIQUE constraint `(medicine_id, info_type, info_text(200))` on `Medicine_Info` | Prevents duplicate use/side_effect/avoid_with rows from repeated seed runs or double form submission. |
-| **P3 — Medium** | Move `fn_user_can_manage_batch` call inside the transaction, after `FOR UPDATE` | Closes the TOCTOU window in `sp_record_test`, `sp_approve_batch`, `sp_reject_batch`, `sp_add_batch_material`. |
-| **P4 — Medium** | Add explicit `SQL SECURITY INVOKER` to `sp_verify_scan` and `v_demo_codes` | Makes the security model explicit; prevents privilege escalation if the definer gains broader rights. |
-| **P5 — Medium** | Change `QR_Codes.code` and `Scan_Log.scanned_code` collation to `utf8mb4_bin` | Enforces exact-byte case-sensitive uniqueness on QR code strings. |
-| **P6 — Low** | Replace `ON DELETE CASCADE` on `fk_bm_batch` and `fk_qtr_batch` with `ON DELETE RESTRICT` | Prevents silent loss of traceability data when a batch is deleted. |
-| **P7 — Low** | Add UNIQUE constraint on `Material_Deliveries.certificate_number` | Certificate uniqueness is currently enforced only in `sp_record_delivery`; a direct INSERT bypasses it. |
-| **P8 — Low** | Add `UNIQUE (batch_id, ingredient_id)` to `Batch_Materials` | Prevents linking the same ingredient twice from different deliveries for the same batch. |
+| **Done** | Add composite index `(batch_id, test_date, report_id)` on `Quality_Test_Reports` | Added to the base schema and non-destructive upgrade. |
+| **Review** | Decide how to prevent duplicate `Medicine_Info` rows | A prefix index on long `TEXT` values can collide for distinct longer strings; define normalization/exact-content semantics before adding a constraint. |
+| **Done** | Move `fn_user_can_manage_batch` call inside the transaction, after `FOR UPDATE` | Batch procedures now lock the batch before checking ownership/active status. |
+| **Review** | Audit the definer privileges of `sp_verify_scan` and `v_demo_codes` | Switching to `SQL SECURITY INVOKER` without base-table privileges would break the least-privilege public account. Use a dedicated least-privilege definer rather than changing security mode blindly. |
+| **Review** | Decide whether QR code matching should be case-sensitive | A binary collation changes current case-insensitive lookup behavior; normalize codes consistently and plan compatibility before migration. |
+| **Done** | Replace `ON DELETE CASCADE` on `fk_bm_batch` and `fk_qtr_batch` with `ON DELETE RESTRICT` | Applied to the base schema and upgrade migration. |
+| **Done** | Add UNIQUE constraint on `Material_Deliveries.certificate_number` | Added to the base schema and upgrade migration, with a duplicate preflight. |
+| **Domain decision** | Consider `UNIQUE (batch_id, ingredient_id)` on `Batch_Materials` | Add only if the business rule prohibits sourcing the same ingredient for one batch from multiple deliveries; the current model may legitimately allow it. |

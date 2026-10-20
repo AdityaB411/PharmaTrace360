@@ -47,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['email']           = $user['email'];
                 $_SESSION['role_name']       = $user['role_name'];
                 $_SESSION['manufacturer_id'] = $user['manufacturer_id'] !== null ? (int)$user['manufacturer_id'] : null;
-                $_SESSION['full_name']       = $user['email'];
+                $_SESSION['full_name']       = $user['full_name'] ?? $user['email'];
                 $_SESSION['manufacturer_name'] = '';
                 $_SESSION['last_activity']   = time();
 

@@ -13,16 +13,19 @@
 -- ============================================================================
 
 -- Execute 01_schema.sql: Drops database pharmatrace360, creates schema, tables, keys & indexes
-SOURCE E:/DBMS/PharmaTrace360/db/01_schema.sql;
+SOURCE db/01_schema.sql;
 
 -- Execute 02_seed.sql: Inserts base reference and simulated data (390 rows across 17 tables)
-SOURCE E:/DBMS/PharmaTrace360/db/02_seed.sql;
+SOURCE db/02_seed.sql;
 
 -- Execute 03_logic.sql: Creates views, functions, triggers, and stored procedures
-SOURCE E:/DBMS/PharmaTrace360/db/03_logic.sql;
+SOURCE db/03_logic.sql;
+
+-- Execute 06_suspicious_review.sql: Installs suspicious-code review support
+SOURCE db/06_suspicious_review.sql;
 
 -- Execute 05_grants.sql: Re-applies GRANT statements for pt_public and pt_app users
-SOURCE E:/DBMS/PharmaTrace360/db/05_grants.sql;
+SOURCE db/05_grants.sql;
 
 -- Verification check
 USE pharmatrace360;
