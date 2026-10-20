@@ -452,11 +452,21 @@ SELECT ROW_COUNT() AS rows_changed;
 SELECT user_id, full_name, email, is_active
 FROM Users
 WHERE email = 'NEW_EMAIL@example.test';
+~~~
 
+**Do not commit blindly.** Inspect the results first: expect exactly one changed row and verify the new email belongs to the intended account. If correct, run this separate statement:
+
+~~~sql
 COMMIT;
 ~~~
 
-**Check the output before committing if you paste interactively:** expect exactly one changed row and verify the new email belongs to the intended account. If the UPDATE fails or the account is not the expected one, run `ROLLBACK;` instead of `COMMIT;`. If the new email already exists, choose a genuinely unique address rather than disabling the unique index.
+If the UPDATE failed or the selected account is not the expected one, run this instead:
+
+~~~sql
+ROLLBACK;
+~~~
+
+If the new email already exists, choose a genuinely unique address rather than disabling the unique index.
 
 If you also need to reset the user's password, run section 5.1 using the **new email** after the email update is committed.
 
@@ -473,10 +483,9 @@ SELECT ROW_COUNT() AS rows_changed;
 SELECT user_id, full_name, email, is_active
 FROM Users
 WHERE email = 'USER_TO_DISABLE@example.test';
-COMMIT;
 ~~~
 
-Verify that exactly one intended row was changed. If not, roll back before committing.
+Verify that exactly one intended row was changed. Then run `COMMIT;` to keep the change, or `ROLLBACK;` to undo it.
 
 ### 6.3 Re-enable a staff account
 
@@ -489,10 +498,9 @@ SELECT ROW_COUNT() AS rows_changed;
 SELECT user_id, full_name, email, is_active
 FROM Users
 WHERE email = 'USER_TO_ENABLE@example.test';
-COMMIT;
 ~~~
 
-Verify exactly one intended row. A disabled account should still use the CLI password tool if its password also needs resetting.
+Verify exactly one intended row. Then run `COMMIT;` to keep the change, or `ROLLBACK;` to undo it. A disabled account should still use the CLI password tool if its password also needs resetting.
 
 ### 6.4 Change role/company association
 
