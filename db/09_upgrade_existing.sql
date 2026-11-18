@@ -80,6 +80,8 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
 -- Preserve QA and material history when deleting batches.
+-- MySQL 8.0 rejects dropping and re-adding a foreign key with the same name in
+-- one ALTER TABLE statement (ERROR 1826), so drop and re-add in separate steps.
 SET @bm_delete_rule = (
     SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS
     WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'Batch_Materials'
@@ -87,7 +89,19 @@ SET @bm_delete_rule = (
     LIMIT 1
 );
 SET @ddl = IF(@bm_delete_rule = 'CASCADE',
-    'ALTER TABLE Batch_Materials DROP FOREIGN KEY fk_bm_batch, ADD CONSTRAINT fk_bm_batch FOREIGN KEY (batch_id) REFERENCES Production_Batches (batch_id) ON DELETE RESTRICT ON UPDATE CASCADE',
+    'ALTER TABLE Batch_Materials DROP FOREIGN KEY fk_bm_batch',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_bm_fk = (
+    SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'Batch_Materials'
+      AND CONSTRAINT_NAME = 'fk_bm_batch'
+);
+SET @ddl = IF(@has_bm_fk = 0,
+    'ALTER TABLE Batch_Materials ADD CONSTRAINT fk_bm_batch FOREIGN KEY (batch_id) REFERENCES Production_Batches (batch_id) ON DELETE RESTRICT ON UPDATE CASCADE',
     'SELECT 1');
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
@@ -100,7 +114,19 @@ SET @qtr_delete_rule = (
     LIMIT 1
 );
 SET @ddl = IF(@qtr_delete_rule = 'CASCADE',
-    'ALTER TABLE Quality_Test_Reports DROP FOREIGN KEY fk_qtr_batch, ADD CONSTRAINT fk_qtr_batch FOREIGN KEY (batch_id) REFERENCES Production_Batches (batch_id) ON DELETE RESTRICT ON UPDATE CASCADE',
+    'ALTER TABLE Quality_Test_Reports DROP FOREIGN KEY fk_qtr_batch',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_qtr_fk = (
+    SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'Quality_Test_Reports'
+      AND CONSTRAINT_NAME = 'fk_qtr_batch'
+);
+SET @ddl = IF(@has_qtr_fk = 0,
+    'ALTER TABLE Quality_Test_Reports ADD CONSTRAINT fk_qtr_batch FOREIGN KEY (batch_id) REFERENCES Production_Batches (batch_id) ON DELETE RESTRICT ON UPDATE CASCADE',
     'SELECT 1');
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;

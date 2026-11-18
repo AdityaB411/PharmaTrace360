@@ -52,7 +52,10 @@ jobs:
           mysql -h 127.0.0.1 -uroot -proot -e "USE pharmatrace360; CALL sp_verify_scan('CI-UNKNOWN-CODE');"
       - name: Verify non-destructive upgrade and repeatable migration
         run: |
+          mysql -h 127.0.0.1 -uroot -proot -e "USE pharmatrace360; ALTER TABLE Batch_Materials DROP FOREIGN KEY fk_bm_batch; ALTER TABLE Batch_Materials ADD CONSTRAINT fk_bm_batch FOREIGN KEY (batch_id) REFERENCES Production_Batches (batch_id) ON DELETE CASCADE ON UPDATE CASCADE; ALTER TABLE Quality_Test_Reports DROP FOREIGN KEY fk_qtr_batch; ALTER TABLE Quality_Test_Reports ADD CONSTRAINT fk_qtr_batch FOREIGN KEY (batch_id) REFERENCES Production_Batches (batch_id) ON DELETE CASCADE ON UPDATE CASCADE;"
           mysql -h 127.0.0.1 -uroot -proot < db/09_upgrade_existing.sql
+          mysql -h 127.0.0.1 -uroot -proot < db/09_upgrade_existing.sql
+          test "$(mysql -h 127.0.0.1 -uroot -proot -N -e "SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA='pharmatrace360' AND CONSTRAINT_NAME IN ('fk_bm_batch','fk_qtr_batch') AND DELETE_RULE='RESTRICT'")" -eq 2
           mysql -h 127.0.0.1 -uroot -proot < db/06_suspicious_review.sql
           mysql -h 127.0.0.1 -uroot -proot < db/06_suspicious_review.sql
           test "$(mysql -h 127.0.0.1 -uroot -proot -N -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='pharmatrace360' AND table_name='Scan_Log' AND column_name='review_status'")" -eq 1
