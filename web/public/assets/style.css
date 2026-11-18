@@ -143,6 +143,112 @@ body {
     color: var(--pt-primary-hover);
 }
 
+/* Demo Staff Account Quick-Fill Cards (login.php) */
+.demo-account-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.demo-account-btn {
+    width: 100%;
+    min-height: 52px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: var(--pt-text-main);
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.demo-account-btn:hover {
+    background: #f0f9ff;
+    border-color: var(--pt-primary);
+}
+
+.demo-account-btn:focus-visible {
+    outline: 3px solid rgba(2, 132, 199, 0.35);
+    outline-offset: 2px;
+    border-color: var(--pt-primary);
+}
+
+.demo-account-btn.is-selected {
+    background: var(--pt-primary-soft);
+    border-color: var(--pt-primary);
+    box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.12);
+}
+
+.demo-account-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.demo-account-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.demo-account-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--pt-text-main);
+}
+
+.demo-account-email {
+    font-size: 0.82rem;
+    font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+    color: #475569;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.demo-role-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    line-height: 1.4;
+}
+
+.demo-role-badge.admin {
+    background: #e0f2fe;
+    color: #0369a1;
+}
+
+.demo-role-badge.manufacturer {
+    background: #ecfdf5;
+    color: #065f46;
+}
+
+.demo-account-action {
+    flex-shrink: 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--pt-primary-hover);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .demo-account-btn,
+    .demo-chip,
+    .btn-check-code {
+        transition: none;
+    }
+}
+
 /* Result Cards & Verdict Headers */
 .verdict-banner {
     border-radius: 16px;

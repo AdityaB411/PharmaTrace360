@@ -21,6 +21,58 @@ if (!empty($_SESSION['user_id'])) {
 }
 
 $errorMessage = null;
+$demoModeActive = false;
+$demoAccounts = [];
+$hasLocalDemoPasswords = false;
+
+try {
+    $config = getAppConfig();
+    $demoModeActive = !empty($config['DEMO_MODE']);
+    if ($demoModeActive) {
+        $localDemoPasswords = is_array($config['DEMO_LOGIN_PASSWORDS'] ?? null)
+            ? $config['DEMO_LOGIN_PASSWORDS']
+            : [];
+
+        $seedDemoAccounts = [
+            [
+                'label' => 'Priya Sharma',
+                'role'  => 'Admin / Regulator',
+                'badge' => 'admin',
+                'email' => 'priya.admin@demo.test',
+            ],
+            [
+                'label' => 'Cipla Ltd',
+                'role'  => 'Manufacturer',
+                'badge' => 'manufacturer',
+                'email' => 'rahul.mfr@demo.test',
+            ],
+            [
+                'label' => 'Alkem Laboratories Ltd',
+                'role'  => 'Manufacturer',
+                'badge' => 'manufacturer',
+                'email' => 'anjali.mfr@demo.test',
+            ],
+            [
+                'label' => 'Alembic Pharmaceuticals Ltd',
+                'role'  => 'Manufacturer',
+                'badge' => 'manufacturer',
+                'email' => 'vikram.mfr@demo.test',
+            ],
+        ];
+
+        foreach ($seedDemoAccounts as $acct) {
+            $pw = $localDemoPasswords[$acct['email']] ?? '';
+            $pwStr = is_string($pw) ? $pw : '';
+            if ($pwStr !== '') {
+                $hasLocalDemoPasswords = true;
+            }
+            $acct['password'] = $pwStr;
+            $demoAccounts[] = $acct;
+        }
+    }
+} catch (Throwable $ignore) {
+    // Keep login form usable; DB errors are handled on POST submission.
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrf()) {
@@ -121,7 +173,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     </header>
 
-    <main class="container my-5" style="max-width: 440px;">
+    <main class="container my-5" style="max-width: 480px;">
         <div class="main-card p-4 p-md-5">
             <h2 class="h4 fw-bold text-center mb-4">Sign in</h2>
 
@@ -129,22 +181,137 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="alert alert-danger" role="alert" id="loginError"><?= e($errorMessage) ?></div>
             <?php endif; ?>
 
-            <form method="POST" action="login.php" id="loginForm">
+            <form method="POST" action="login.php" id="loginForm" autocomplete="on">
                 <input type="hidden" name="csrf_token" value="<?= e(csrfToken()) ?>">
 
                 <div class="mb-3">
                     <label for="email" class="form-label fw-medium">Email</label>
                     <input type="email" name="email" id="email" class="form-control" required autofocus
+                           autocomplete="username"
                            value="<?= e($_POST['email'] ?? '') ?>">
                 </div>
 
                 <div class="mb-4">
                     <label for="password" class="form-label fw-medium">Password</label>
-                    <input type="password" name="password" id="password" class="form-control" required>
+                    <input type="password" name="password" id="password" class="form-control" required
+                           autocomplete="current-password">
                 </div>
 
                 <button type="submit" class="btn btn-check-code w-100" id="loginButton">Sign in</button>
             </form>
+
+            <?php if ($demoModeActive && !empty($demoAccounts)): ?>
+                <section class="demo-box mt-4" aria-label="Demo staff accounts">
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                             class="text-primary flex-shrink-0" aria-hidden="true">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                        </svg>
+                        <h3 class="h6 fw-bold mb-0">Demo Staff Accounts</h3>
+                    </div>
+                    <p class="small mb-3" style="color: #475569;">
+                        <?php if ($hasLocalDemoPasswords): ?>
+                            Click any account below to auto-fill its email and password.
+                        <?php else: ?>
+                            Click any account below to fill its email (add local demo passwords in <code>web/config.local.php</code> to auto-fill both).
+                        <?php endif; ?>
+                    </p>
+
+                    <div class="demo-account-list" role="group" aria-label="Choose a demo staff account">
+                        <?php foreach ($demoAccounts as $idx => $acct): ?>
+                            <button type="button"
+                                    class="demo-account-btn"
+                                    data-demo-index="<?= (int)$idx ?>"
+                                    aria-pressed="false">
+                                <span class="demo-account-meta">
+                                    <span class="demo-account-header">
+                                        <span class="demo-account-name"><?= e($acct['label']) ?></span>
+                                        <span class="demo-role-badge <?= e($acct['badge']) ?>"><?= e($acct['role']) ?></span>
+                                    </span>
+                                    <span class="demo-account-email"><?= e($acct['email']) ?></span>
+                                </span>
+                                <span class="demo-account-action">
+                                    <span class="demo-action-label">Use</span>
+                                </span>
+                            </button>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <p id="demoFillStatus" class="small mt-2 mb-0" style="color: #0369a1; min-height: 1.25rem;" aria-live="polite"></p>
+                </section>
+
+                <script id="demoAccountsPayload" type="application/json"><?= json_encode(
+                    array_map(
+                        static fn(array $a): array => [
+                            'email'    => $a['email'],
+                            'password' => $a['password'],
+                            'label'    => $a['label'],
+                        ],
+                        $demoAccounts
+                    ),
+                    JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+                ) ?></script>
+                <script>
+                    (function () {
+                        var payloadEl = document.getElementById('demoAccountsPayload');
+                        var emailInput = document.getElementById('email');
+                        var passwordInput = document.getElementById('password');
+                        var loginButton = document.getElementById('loginButton');
+                        var statusEl = document.getElementById('demoFillStatus');
+                        var buttons = document.querySelectorAll('.demo-account-btn');
+                        if (!payloadEl || !emailInput || !passwordInput || !buttons.length) {
+                            return;
+                        }
+
+                        var accounts = JSON.parse(payloadEl.textContent || '[]');
+
+                        buttons.forEach(function (btn) {
+                            btn.addEventListener('click', function () {
+                                var idx = parseInt(btn.getAttribute('data-demo-index') || '-1', 10);
+                                var acct = accounts[idx];
+                                if (!acct) {
+                                    return;
+                                }
+
+                                emailInput.value = acct.email || '';
+                                if (acct.password) {
+                                    passwordInput.value = acct.password;
+                                } else {
+                                    passwordInput.value = '';
+                                }
+
+                                buttons.forEach(function (other) {
+                                    var selected = other === btn;
+                                    other.classList.toggle('is-selected', selected);
+                                    other.setAttribute('aria-pressed', selected ? 'true' : 'false');
+                                    var labelEl = other.querySelector('.demo-action-label');
+                                    if (labelEl) {
+                                        labelEl.textContent = selected ? 'Filled' : 'Use';
+                                    }
+                                });
+
+                                if (acct.password) {
+                                    if (statusEl) {
+                                        statusEl.textContent = 'Filled email and password for ' + acct.label + '. Click Sign in to continue.';
+                                    }
+                                    if (loginButton) {
+                                        loginButton.focus();
+                                    }
+                                } else {
+                                    if (statusEl) {
+                                        statusEl.textContent = 'Filled email for ' + acct.label + '. Enter password to sign in.';
+                                    }
+                                    passwordInput.focus();
+                                }
+                            });
+                        });
+                    })();
+                </script>
+            <?php endif; ?>
         </div>
     </main>
 

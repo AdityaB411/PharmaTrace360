@@ -36,8 +36,17 @@ return [
             'password' => '', // Set your pt_setup password here
         ],
     ],
-    // When true, displays sample QR codes on the scan page for demonstration
+    // When true, displays sample QR codes on the scan page and demo account quick-fill cards on login.php
     'DEMO_MODE' => true,
+
+    // Optional (local demo ONLY): map demo emails to local passwords for one-click fill on login.php
+    // when DEMO_MODE is true. Leave empty or remove outside local demonstrations. Never commit real passwords.
+    'DEMO_LOGIN_PASSWORDS' => [
+        // 'priya.admin@demo.test'  => '',
+        // 'rahul.mfr@demo.test'    => '',
+        // 'anjali.mfr@demo.test'   => '',
+        // 'vikram.mfr@demo.test'   => '',
+    ],
 
     // Public base URL used for QR code verification links and printable sheets.
     // Set this to your PC's local network address (e.g. http://192.168.1.50:8000) for phone scanning on the same Wi-Fi.
