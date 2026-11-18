@@ -135,6 +135,7 @@ erDiagram
         INT qr_id FK
         DATETIME scanned_at
         ENUM verdict
+        ENUM review_status
     }
 
     Product_Recalls {

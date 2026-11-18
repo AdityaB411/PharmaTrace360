@@ -49,7 +49,107 @@ Quality Assurance Testing (Pass / Fail)
 
 ---
 
-## 2. Schema Architecture & ER Design (All 17 Tables)
+## 2. Technology Stack, Languages, MySQL Internals & Project Structure
+
+### Languages & Technologies Used (and Why)
+
+| Layer | Language / Tool | Exact Role in PharmaTrace 360 |
+|---|---|---|
+| **Database & Business Logic** | **SQL (MySQL 8.0+)** | Core relational database: 17 BCNF tables, foreign keys, `CHECK`/`UNIQUE` constraints, 18 indexes, 16 views, 3 functions, 16 triggers, 14 stored procedures, transactions (`FOR UPDATE`), and least-privilege `GRANT`s. |
+| **Backend Server** | **PHP 8.2+** (`declare(strict_types=1)`) | Lightweight server-rendered backend run via PHP's built-in server (`php -S localhost:8000 -t web/public`). Connects to MySQL exclusively through **PDO (`pdo_mysql`)** with native prepared statements (`PDO::ATTR_EMULATE_PREPARES => false`). |
+| **Frontend Markup & Styling** | **HTML5, CSS3, Bootstrap 5.3** | Semantic, WCAG AA accessible consumer & staff interfaces (`web/public/assets/style.css` + vendored local `bootstrap.min.css` & `bootstrap.bundle.min.js`, zero CDN dependency for Bootstrap). |
+| **Client-Side Scripting** | **Vanilla JavaScript (ES6) + `qrcodejs`** | Renders scannable unit-level QR codes in the browser (`web/public/assets/vendor/qrcode/qrcode.min.js`), powers printable 4-column A4 QR sheets (`qr_sheet.php`), and handles `DEMO_MODE` quick-fill interactions. |
+| **Data Cleaning & Seed Generation** | **Python 3** (standard library: `csv`, `re`, `uuid`, `pathlib`) | Offline data pipeline (`data/clean/build_medicines_15.py` cleans raw Kaggle CSVs into `medicines_15.csv`; `db/build_seed.py` deterministically generates `db/02_seed.sql`). Not required at runtime. |
+| **Documentation & Diagrams** | **Markdown + Mermaid** | All academic & technical docs in `docs/`, including the full 17-table Mermaid ER diagram (`docs/er_diagram.md`). |
+| **CI / Automated Verification** | **GitHub Actions (YAML)** | `.github/workflows/ci.yml` automatically lints PHP 8.2, compiles Python 3.12, boots a real **MySQL 8.0** container, and tests every SQL bootstrap, query, ACID demo, upgrade, and regression script on every push. |
+
+### MySQL 8.0 Engine & Configuration Details
+
+| Setting / Feature | Value / Implementation | Why It Matters (Viva Explanation) |
+|---|---|---|
+| **DBMS** | MySQL Community Server **8.0+** (`MySQL80` Windows service, TCP port `3306`) | Supports native enforced `CHECK` constraints (ignored before MySQL 8.0.16), Window Functions (`ROW_NUMBER`, `RANK`, `SUM OVER`), CTEs (`WITH`), and `SIGNAL SQLSTATE`. |
+| **Storage Engine** | **InnoDB** (default for all 17 tables) | Required for full **ACID** transactions, foreign key enforcement, row-level locking (`SELECT ... FOR UPDATE`), and crash-safe Write-Ahead Logging (redo log). |
+| **Character Set & Collation** | `utf8mb4` / `utf8mb4_unicode_ci` | Full Unicode safety; case-insensitive matching lets consumers manually type `pt360-...` in lowercase while `uq_qr_code` still prevents mixed-case duplicates. |
+| **Default Isolation Level** | `REPEATABLE-READ` | Prevents dirty reads and non-repeatable reads; paired with `FOR UPDATE` row locks on `Production_Batches` and `Material_Deliveries` to eliminate lost updates & TOCTOU races. |
+| **Durability Setting** | `innodb_flush_log_at_trx_commit = 1` | Flushes the redo log to disk on every `COMMIT` so committed data survives sudden crashes. |
+| **PHP Driver** | `PDO` (`pdo_mysql`) with `ERRMODE_EXCEPTION` & `EMULATE_PREPARES = false` | Forces real server-side parameterized queries, eliminating SQL injection and properly reading multi-result sets from `sp_verify_scan` via `nextRowset()` / `closeCursor()`. |
+
+### End-to-End Request Architecture
+
+```mermaid
+flowchart LR
+    B["Browser / Phone Camera"] -->|"HTTP (localhost:8000 / LAN)"| P["PHP 8.2 Built-in Server (web/public)"]
+    P -->|"Public scan (index.php)"| PUB["PDO: pt_public"]
+    P -->|"Staff portal (/app/*, login.php)"| APP["PDO: pt_app"]
+    CLI["CLI Admin (web/tools/set_password.php)"] -->|"Offline CLI only"| SET["PDO: pt_setup"]
+    PUB -->|"CALL sp_verify_scan / SELECT v_demo_codes"| DB["MySQL 8.0 (InnoDB) — Views & Procedures (SQL SECURITY DEFINER)"]
+    APP -->|"12 Staff SPs + 15 Views (0 table grants)"| DB
+    SET -->|"CALL sp_set_password only"| DB
+    DB -->|"BEFORE validation + AFTER audit triggers"| TBL["17 BCNF Base Tables + Append-Only Audit_Logs"]
+```
+
+### Complete Project Folder & File Map
+
+```text
+PharmaTrace360/
+├── README.md                          # Project introduction & quick start
+├── COMMANDS.md                        # Copy-paste MySQL, PHP & maintenance command cookbook
+├── .github/workflows/ci.yml           # Automated PHP/Python lint + MySQL 8.0 CI verification
+├── data/
+│   ├── raw/                           # Read-only Kaggle CSVs (gitignored, never modified)
+│   └── clean/
+│       ├── build_medicines_15.py      # Extracts & normalizes 15 real medicines from raw CSVs
+│       └── medicines_15.csv           # Clean 15-medicine dataset imported by db/build_seed.py
+├── db/
+│   ├── 00_reset_all.sql               # Master fresh install (01 -> 02 -> 03 -> 06_review -> 05)
+│   ├── 01_schema.sql                  # 17 BCNF tables, 21 FKs, 7 CHECKs, 18 indexes/UKs
+│   ├── 02_seed.sql                    # 390 rows across 17 tables (generated by build_seed.py)
+│   ├── 03_logic.sql                   # 16 views, 3 functions, 16 triggers, 13 stored procedures
+│   ├── 04_demo.sql                    # End-to-end SQL walkthrough (views, scan, approve, recall, EXPLAIN)
+│   ├── 05_grants.sql                  # Least-privilege GRANTs for pt_public & pt_app
+│   ├── 06_queries.sql                 # 14 labelled read-only SQL queries (JOINs, CTE, Window, Trace)
+│   ├── 06_suspicious_review.sql       # Repeatable migration: Scan_Log.review_status + sp_update_suspicious_review
+│   ├── 07_acid_demo.sql               # Runnable Atomicity, Consistency, Isolation & Durability demo
+│   ├── 08_feature_tests.sql           # Happy-path & negative trigger/procedure regression suite
+│   ├── 09_upgrade_existing.sql        # Non-destructive schema/index/routine upgrade for existing DBs
+│   ├── 10_setup_grants.sql            # CLI-only sp_set_password grant for pt_setup
+│   └── build_seed.py                  # Python script that builds db/02_seed.sql
+├── web/
+│   ├── config.sample.php              # Template config (copy to gitignored web/config.local.php)
+│   ├── includes/
+│   │   ├── db.php                     # PDO pools (dbPublic/dbApp/dbSetup), session/CSRF, security headers
+│   │   └── layout.php                 # Shared staff header, role-aware nav, Bootstrap JS footer
+│   ├── tools/set_password.php         # CLI-only bcrypt password bootstrapper (uses pt_setup)
+│   └── public/
+│       ├── index.php                  # Anonymous public QR verification portal
+│       ├── login.php / logout.php     # Staff auth (with DEMO_MODE quick-fill) & POST CSRF logout
+│       ├── assets/                    # style.css + vendored Bootstrap 5.3 & qrcode.min.js
+│       └── app/                       # Role-guarded staff pages: dashboard, batches, all_batches,
+│                                      # batch_new, batch_detail, deliveries, qr_sheet, recall,
+│                                      # recalls, suspicious, audit, change_password
+└── docs/
+    ├── DBMS_A_TO_Z_OVERVIEW.md        # This complete A-to-Z DBMS & architecture guide
+    ├── er_diagram.md                  # Full 17-table Mermaid ER diagram + relationship guide
+    ├── relational_schema.md           # Relational schema notation (PK/FK summary)
+    ├── data_dictionary.md             # Column-by-column data dictionary
+    ├── normalization.md               # Plain-English 1NF -> 2NF -> 3NF -> BCNF proof
+    ├── functional_dependencies.md     # Formal candidate keys, FDs & deliberate denormalisations
+    ├── logic_overview.md              # Detailed breakdown of views, functions, triggers & procedures
+    ├── dbms_audit.md                  # Formal DBMS audit report & resolutions
+    ├── expected_counts.md             # Exact expected row counts (390 rows) & demo scenarios
+    ├── test_cases.md                  # Functional & security test matrix
+    ├── SETUP.md                       # Step-by-step Windows MySQL 8 + PHP setup guide
+    ├── CONTEXT.md                     # Single source of truth for project rules & scope
+    ├── data_overrides.md              # Documented hand-supplied values & rationale
+    ├── dataset_report.md              # Raw Kaggle dataset exploration & cleaning report
+    ├── known_limitations.md           # Transparent academic assumptions & trade-offs
+    ├── audit_fixes.md                 # Security/DB audit fix log
+    └── changes_from_original_plan.md  # Evolution notes from initial plan
+```
+
+---
+
+## 3. Schema Architecture & ER Design (All 17 Tables)
 
 The schema is organized into **four clean relational domains**:
 
@@ -116,7 +216,7 @@ erDiagram
 
 ---
 
-## 3. Keys, Constraints & Referential Integrity
+## 4. Keys, Constraints & Referential Integrity
 
 ### `CHECK` Constraints (7 total — single-row domain integrity)
 | Table | Constraint | Rule |
@@ -137,7 +237,7 @@ erDiagram
 
 ---
 
-## 4. Normalization (1NF → BCNF) & Deliberate Denormalisations
+## 5. Normalization (1NF → BCNF) & Deliberate Denormalisations
 
 | Normal Form | Rule | How PharmaTrace 360 Satisfies It |
 |---|---|---|
@@ -153,7 +253,7 @@ erDiagram
 
 ---
 
-## 5. Indexing Strategy & `EXPLAIN` Proofs
+## 6. Indexing Strategy & `EXPLAIN` Proofs
 
 Every secondary index exists to serve a concrete query path:
 
@@ -189,7 +289,7 @@ EXPLAIN SELECT * FROM Scan_Log WHERE scanned_code = 'PT360-2DBC2CDE0F05';
 
 ---
 
-## 6. Views Catalog (All 16 Views)
+## 7. Views Catalog (All 16 Views)
 
 Views decouple the PHP application from raw tables and enforce least-privilege access (`pt_public` and `pt_app` read *only* views).
 
@@ -214,7 +314,7 @@ Views decouple the PHP application from raw tables and enforce least-privilege a
 
 ---
 
-## 7. Stored Functions (All 3 Functions)
+## 8. Stored Functions (All 3 Functions)
 
 All functions are declared `READS SQL DATA` and `NOT DETERMINISTIC` (they query live table state and `NOW()`/`CURDATE()`).
 
@@ -230,7 +330,7 @@ All functions are declared `READS SQL DATA` and `NOT DETERMINISTIC` (they query 
 
 ---
 
-## 8. Triggers (All 16 Triggers)
+## 9. Triggers (All 16 Triggers)
 
 Triggers enforce **cross-table, state-machine, and immutability rules** that plain `CHECK` constraints cannot express.
 
@@ -258,7 +358,7 @@ Every operational table automatically writes to `Audit_Logs` using the session v
 
 ---
 
-## 9. Stored Procedures (All 14 Procedures)
+## 10. Stored Procedures (All 14 Procedures)
 
 | Category | Procedure | What It Does |
 |---|---|---|
@@ -279,7 +379,7 @@ Every operational table automatically writes to `Audit_Logs` using the session v
 
 ---
 
-## 10. Transactions, Concurrency Control & ACID Properties
+## 11. Transactions, Concurrency Control & ACID Properties
 
 All mutating procedures wrap work in `START TRANSACTION ... COMMIT` with a `DECLARE EXIT HANDLER FOR SQLEXCEPTION` that resets `@app_user_id = NULL`, executes `ROLLBACK`, and re-signals the exact error message.
 
@@ -292,7 +392,7 @@ All mutating procedures wrap work in `START TRANSACTION ... COMMIT` with a `DECL
 
 ---
 
-## 11. Database Security & Least-Privilege Model
+## 12. Database Security & Least-Privilege Model
 
 Security is enforced at **two independent layers** (DB + Web):
 
@@ -312,7 +412,7 @@ Security is enforced at **two independent layers** (DB + Web):
 
 ---
 
-## 12. Advanced SQL Query Showcase (`db/06_queries.sql`)
+## 13. Advanced SQL Query Showcase (`db/06_queries.sql`)
 
 All **14 read-only queries** execute cleanly against the seeded database and map directly to standard DBMS syllabus topics:
 
@@ -337,7 +437,7 @@ All **14 read-only queries** execute cleanly against the seeded database and map
 
 ---
 
-## 13. Data Pipeline, Migrations & Automated CI
+## 14. Data Pipeline, Migrations & Automated CI
 
 1. **Real vs. Simulated Data Policy:**
    - Real Indian medicine names, manufacturers, active ingredients, uses, side effects, and drug interactions come from read-only Kaggle datasets in `data/raw/` (gitignored), transformed by `data/clean/build_medicines_15.py` into `data/clean/medicines_15.csv` (15 medicines; 3 hand-supplied interaction fallbacks transparently documented in `docs/data_overrides.md` and `docs/known_limitations.md`).
@@ -350,7 +450,7 @@ All **14 read-only queries** execute cleanly against the seeded database and map
 
 ---
 
-## 14. Presentation Walkthrough & Top 15 Viva Q&As
+## 15. Presentation Walkthrough & Top 15 Viva Q&As
 
 ### Recommended Live Demo Commands (from `E:\DBMS\PharmaTrace360`)
 ```cmd
