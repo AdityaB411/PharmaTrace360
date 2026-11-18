@@ -290,6 +290,42 @@ function requireRole($roles): void
 }
 
 /**
+ * Send defensive HTTP security headers before HTML output.
+ */
+function sendSecurityHeaders(bool $noStore = false): void
+{
+    if (headers_sent()) {
+        return;
+    }
+
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: DENY');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+
+    if ($noStore) {
+        header('Cache-Control: no-store, no-cache, must-revalidate, private');
+        header('Pragma: no-cache');
+    }
+}
+
+/**
+ * Extract a clean user-facing message from a MySQL SIGNAL SQLSTATE '45000' exception.
+ * Never leaks raw SQL, table names, or internal stack details.
+ */
+function friendlyDbError(Throwable $e, string $fallback = 'Action could not be completed due to business rule validation.'): string
+{
+    $msg = $e->getMessage();
+    if (preg_match('/1644\s+(.+)$/i', $msg, $m)) {
+        return trim($m[1]);
+    }
+    if (str_contains($msg, 'SQLSTATE[45000]')) {
+        $parts = explode(':', $msg);
+        return trim(end($parts));
+    }
+    return $fallback;
+}
+
+/**
  * HTML-escape helper.
  */
 function e(?string $val): string

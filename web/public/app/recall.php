@@ -19,20 +19,6 @@ $successMsg = null;
 $errorMsg = null;
 $impact = null;
 
-// Clean up MySQL exception message to display friendly text
-function friendlyDbError(Throwable $e): string
-{
-    $msg = $e->getMessage();
-    if (preg_match('/1644\s+(.+)$/i', $msg, $m)) {
-        return trim($m[1]);
-    }
-    if (str_contains($msg, 'SQLSTATE[45000]')) {
-        $parts = explode(':', $msg);
-        return trim(end($parts));
-    }
-    return 'Action could not be completed due to regulatory rule validation.';
-}
-
 // ─── Handle Recall Submission ────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($_SESSION['role_name'] !== 'Admin/Regulator') {
@@ -54,26 +40,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($batchNumber === '' || $reason === '') {
         $errorMsg = 'Batch number and recall reason are required.';
     } else {
-        // Verify batch exists before calling the procedure
-        $chkStmt = $pdo->prepare('SELECT batch_number, manufacturer FROM v_batch_overview WHERE batch_number = ? LIMIT 1');
-        $chkStmt->execute([$batchNumber]);
-        $targetBatch = $chkStmt->fetch(PDO::FETCH_ASSOC);
-        $chkStmt->closeCursor();
+        try {
+            // Verify batch exists before calling the procedure
+            $chkStmt = $pdo->prepare('SELECT batch_number, manufacturer FROM v_batch_overview WHERE batch_number = ? LIMIT 1');
+            $chkStmt->execute([$batchNumber]);
+            $targetBatch = $chkStmt->fetch(PDO::FETCH_ASSOC);
+            $chkStmt->closeCursor();
 
-        if (!$targetBatch) {
-            $errorMsg = 'Batch not found.';
-        } else {
-            try {
+            if (!$targetBatch) {
+                $errorMsg = 'Batch not found.';
+            } else {
                 $stmt = $pdo->prepare('CALL sp_issue_recall(?, ?, ?)');
                 $stmt->execute([$batchNumber, $reason, $userId]);
                 $impact = $stmt->fetch(PDO::FETCH_ASSOC);
                 $stmt->closeCursor();
 
                 $successMsg = "Recall successfully issued for batch {$batchNumber}.";
-            } catch (Throwable $e) {
-                logAppError($e);
-                $errorMsg = friendlyDbError($e);
             }
+        } catch (Throwable $e) {
+            logAppError($e);
+            $errorMsg = friendlyDbError($e, 'Action could not be completed due to regulatory rule validation.');
         }
     }
 }

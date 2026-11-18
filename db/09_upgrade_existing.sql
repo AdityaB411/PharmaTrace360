@@ -79,6 +79,78 @@ PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+SET @has_supplier_uq = (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Suppliers'
+      AND INDEX_NAME = 'uq_supplier_name'
+);
+SET @ddl = IF(@has_supplier_uq = 0,
+    'CREATE UNIQUE INDEX uq_supplier_name ON Suppliers (supplier_name)',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_med_info_uq = (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Medicine_Info'
+      AND INDEX_NAME = 'uq_medicine_info_item'
+);
+SET @ddl = IF(@has_med_info_uq = 0,
+    'CREATE UNIQUE INDEX uq_medicine_info_item ON Medicine_Info (medicine_id, info_type, info_text(200))',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_batch_status_idx = (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Production_Batches'
+      AND INDEX_NAME = 'idx_batches_status_expiry'
+);
+SET @ddl = IF(@has_batch_status_idx = 0,
+    'CREATE INDEX idx_batches_status_expiry ON Production_Batches (status, expiry_date)',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_scan_verdict_idx = (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Scan_Log'
+      AND INDEX_NAME = 'idx_scan_verdict'
+);
+SET @ddl = IF(@has_scan_verdict_idx = 0,
+    'CREATE INDEX idx_scan_verdict ON Scan_Log (verdict)',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_audit_time_idx = (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Audit_Logs'
+      AND INDEX_NAME = 'idx_audit_logged_at'
+);
+SET @ddl = IF(@has_audit_time_idx = 0,
+    'CREATE INDEX idx_audit_logged_at ON Audit_Logs (logged_at)',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_audit_tbl_idx = (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Audit_Logs'
+      AND INDEX_NAME = 'idx_audit_table_record'
+);
+SET @ddl = IF(@has_audit_tbl_idx = 0,
+    'CREATE INDEX idx_audit_table_record ON Audit_Logs (table_name, record_id, action)',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- Preserve QA and material history when deleting batches.
 -- MySQL 8.0 rejects dropping and re-adding a foreign key with the same name in
 -- one ALTER TABLE statement (ERROR 1826), so drop and re-add in separate steps.

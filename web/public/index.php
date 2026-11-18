@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/db.php';
 
+sendSecurityHeaders(false);
+
 $rawCode = $_GET['code'] ?? $_POST['code'] ?? '';
 $code = is_string($rawCode) ? trim($rawCode) : '';
 $scanResult = null;

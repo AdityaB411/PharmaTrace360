@@ -49,20 +49,22 @@ The `Roles` table in the database contains **exactly 2 rows**: `Admin/Regulator`
 
 Permissions are strictly enforced at **two independent layers**:
 1. **Database Layer (MySQL Least Privilege):**
-   - Public uses `pt_public` (EXECUTE on `sp_verify_scan`, SELECT on `v_demo_codes` only).
-   - Staff application uses `pt_app` (EXECUTE on business procedures, SELECT on views only, NO direct table access).
-   - Stored procedures enforce authorization: `fn_user_can_manage_batch` restricts test/approve/reject actions to the batch's owning manufacturer; `sp_issue_recall` restricts recalls to active `Admin/Regulator` users.
+   - Public uses `pt_public` (`EXECUTE` on `sp_verify_scan`, `SELECT` on `v_demo_codes` only).
+   - Staff application uses `pt_app` (`EXECUTE` on business procedures, `SELECT` on views only, NO direct table access).
+   - CLI password bootstrap uses a separate `pt_setup` account (`EXECUTE` on `sp_set_password` only; never used by web pages).
+   - Stored procedures enforce authorization: `fn_user_can_manage_batch` restricts test/approve/reject/material-link actions to the batch's owning manufacturer inside `FOR UPDATE` transactions; `sp_issue_recall` and `sp_update_suspicious_review` restrict actions to active `Admin/Regulator` users.
 2. **Web Layer (PHP Security Guard):**
-   - Session authentication with HTTP-only and SameSite cookies.
+   - Session authentication with HTTP-only, SameSite=Lax cookies, `session.use_strict_mode = 1`, and live `sp_session_lookup` revalidation on every protected request.
    - `requireRole()` route guard prevents unauthorized URL navigation.
-   - Per-form CSRF tokens prevent request forgery.
+   - Per-form CSRF tokens prevent request forgery (including POST logout).
    - 30-minute idle session timeout.
 
 | Role | Database User | Allowed Database Operations | Web Portal Capabilities |
 |---|---|---|---|
 | **Public** | `pt_public` | `sp_verify_scan`, `v_demo_codes` | Anonymous drug verification via QR code |
-| **Manufacturer** | `pt_app` | `sp_record_delivery`, `sp_create_batch`, `sp_add_batch_material`, `sp_record_test`, `sp_approve_batch`, `sp_reject_batch`, `sp_change_password`, `v_batch_overview`, `v_batch_traceability`, `v_batch_tests`, `v_batch_qr_codes`, `v_form_suppliers`, `v_form_ingredients`, `v_form_medicines`, `v_form_factories`, `v_my_deliveries`, `v_batch_timeline` | View company batches, view traceability & tests, record raw deliveries, create pending batches, link materials, record QA tests, approve/reject batches, view vertical batch lifecycle timeline, change password |
-| **Admin** | `pt_app` | `sp_issue_recall`, `sp_log_event`, `sp_login_lookup`, `sp_set_password`, `sp_change_password`, `v_dashboard`, `v_batch_status_counts`, `v_batch_overview`, `v_suspicious_codes`, `v_recent_audit`, `v_recall_list`, `v_batch_timeline` | KPI dashboard (Recalls KPI card links to `/app/recalls.php`), all-batch monitoring, high-frequency scan alerts, immutable audit log, emergency recall with impact assessment, recall list at `/app/recalls.php` (totals + post-recall scans), vertical batch lifecycle timeline in batch detail, change password |
+| **Manufacturer** | `pt_app` | `sp_record_delivery`, `sp_create_batch`, `sp_add_batch_material`, `sp_record_test`, `sp_approve_batch`, `sp_reject_batch`, `sp_change_password`, `sp_login_lookup`, `sp_session_lookup`, `sp_log_event`, `v_batch_overview`, `v_batch_traceability`, `v_batch_tests`, `v_batch_qr_codes`, `v_form_suppliers`, `v_form_ingredients`, `v_form_medicines`, `v_form_factories`, `v_my_deliveries`, `v_batch_timeline` | View company batches, view traceability & tests, record raw deliveries, create pending batches, link materials, record QA tests, approve/reject batches, view vertical batch lifecycle timeline, change password |
+| **Admin** | `pt_app` | `sp_issue_recall`, `sp_update_suspicious_review`, `sp_log_event`, `sp_login_lookup`, `sp_session_lookup`, `sp_change_password`, `v_dashboard`, `v_batch_status_counts`, `v_batch_overview`, `v_suspicious_codes`, `v_recent_audit`, `v_recall_list`, `v_batch_timeline` | KPI dashboard (Recalls KPI card links to `/app/recalls.php`), all-batch monitoring, high-frequency scan alerts & review triage, immutable audit log, emergency recall with impact assessment, recall list at `/app/recalls.php` (totals + post-recall scans), vertical batch lifecycle timeline in batch detail, change password |
+| **CLI Setup Tool** | `pt_setup` | `sp_set_password` | Offline CLI password bootstrap (`web/tools/set_password.php`) only |
 
 > **Important notes:**
 > - The `Roles` table has **exactly 2 rows** (`Admin/Regulator` and `Manufacturer`). There is **no 3rd role**.
@@ -267,13 +269,15 @@ are strictly enforced by MySQL triggers in `db/03_logic.sql`:
 - `sp_issue_recall(IN p_batch_number, IN p_reason, IN p_user_id)`: Authorizes active Admin/Regulator, locks batch row (`FOR UPDATE`), creates recall record, marks batch `'Recalled'`, and returns impact report.
 - `sp_change_password(IN p_user_id, IN p_new_hash)`: Updates user bcrypt hash and logs `'PASSWORD_CHANGED'` audit event.
 - `sp_log_event(IN p_user_id, IN p_action, IN p_details)`: Helper to record authentication events.
-- `sp_login_lookup(IN p_email)`: Returns credentials and role for PHP authentication.
-- `sp_set_password(IN p_email, IN p_hash)`: CLI utility procedure to set user password by email.
+- `sp_login_lookup(IN p_email)`: Returns credentials, full name, and role for PHP authentication.
+- `sp_session_lookup(IN p_user_id)`: Revalidates active status, current role, and `manufacturer_id` on every protected request.
+- `sp_update_suspicious_review(IN p_code, IN p_status, IN p_user_id)`: Allows active Admin/Regulator users to triage flagged codes (`New`, `Reviewed`, `Blocked`) with audit logging.
+- `sp_set_password(IN p_email, IN p_hash)`: CLI-only utility procedure (granted to `pt_setup`) to set user password by email.
 
 ### Views
 - `v_batch_overview`: Batch summary with medicine, manufacturer, factory, status, and QR count.
 - `v_batch_traceability`: Upstream raw material and certificate traceability per batch.
-- `v_suspicious_codes`: Aggregates codes scanned > 5 times to flag counterfeiting.
+- `v_suspicious_codes`: Aggregates codes scanned > 10 times within the rolling 48-hour window (plus analyst `review_status`) to flag counterfeiting.
 - `v_dashboard`: High-level system KPIs (approved batches, failed tests, suspicious scans, recalls).
 - `v_batch_status_counts`: Distribution of batches across statuses.
 - `v_demo_codes`: Sample codes for Genuine, Expired, and Recalled products.

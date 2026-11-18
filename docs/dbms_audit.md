@@ -89,71 +89,62 @@
 
 ## C. Index Supporting "Latest Quality Test per Batch"
 
-**Is there an index on Quality_Test_Reports(batch_id, test_date, report_id)? No**
+**Is there an index on Quality_Test_Reports(batch_id, test_date, report_id)? Yes**
 
-The query `ORDER BY test_date DESC, report_id DESC LIMIT 1` used in `trg_batches_bu`
-[03_logic.sql:512-516] and `sp_reject_batch` [03_logic.sql:1076-1079] has no supporting
-composite index. The only index on `Quality_Test_Reports` is the PK (`report_id`).
-MySQL must perform a full scan of all test rows for a batch on every approval or rejection.
-
-> **Impact:** Low at current dataset size; becomes significant under load with many test reports.
+Composite index `idx_qtr_batch_latest (batch_id, test_date, report_id)` is defined in
+`db/01_schema.sql` (and applied idempotently in `db/09_upgrade_existing.sql`), directly
+supporting the `ORDER BY test_date DESC, report_id DESC LIMIT 1` lookup in `trg_batches_bu`
+and `sp_reject_batch`.
 
 ---
 
 ## D. Unique Key Preventing Duplicate Medicine_Info Rows
 
-**Is there a unique key preventing duplicate Medicine_Info rows? No**
+**Is there a unique key preventing duplicate Medicine_Info rows? Yes**
 
-`Medicine_Info` has only a PK on `info_id` [01_schema.sql:213]. There is no UNIQUE constraint
-on `(medicine_id, info_type, info_text)`. Two identical rows with the same medicine, type, and
-text can be inserted without error [01_schema.sql:208-219].
+`UNIQUE KEY uq_medicine_info_item (medicine_id, info_type, info_text(200))` in
+`db/01_schema.sql` (and `db/09_upgrade_existing.sql`) prevents duplicate uses, side effects,
+and drug-interaction entries per medicine while also indexing `WHERE medicine_id = ? AND info_type = ?`
+lookups in `sp_verify_scan`.
 
 ---
 
 ## E. Charset and Collation of QR_Codes.code and Scan_Log.scanned_code
 
-**Rating: Partly**
+**Rating: Yes (documented design choice)**
 
-The database is created with `CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
-[01_schema.sql:18-20]. Neither `QR_Codes.code` (VARCHAR(64)) [01_schema.sql:315] nor
-`Scan_Log.scanned_code` (VARCHAR(64)) [01_schema.sql:335] override this at column level.
-They therefore inherit `utf8mb4 / utf8mb4_unicode_ci`.
-
-This is correct for multi-byte safety, but `utf8mb4_unicode_ci` is a **case-insensitive**
-collation. The UNIQUE index `uq_qr_code` [01_schema.sql:319] will silently treat
-`PT360-ABCDEF000001` and `pt360-abcdef000001` as duplicates — intentional but undocumented.
+The database uses `CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`. `QR_Codes.code` and
+`Scan_Log.scanned_code` inherit `utf8mb4_unicode_ci`, which is **intentional** so consumers
+manually typing a QR code in lowercase still match uppercase issued codes (`PT360-...`) and
+mixed-case visually confusable duplicates are rejected by `uq_qr_code`.
 
 ---
 
 ## F. Routines and Views Using SQL SECURITY DEFINER or INVOKER
 
-**Rating: No — none explicitly declared**
+**Rating: Yes (intentional `DEFINER` least-privilege model)**
 
-No `CREATE VIEW`, `CREATE FUNCTION`, or `CREATE PROCEDURE` statement in `03_logic.sql`
-contains a `SQL SECURITY` clause. MySQL defaults to `SQL SECURITY DEFINER` for all stored
-routines and views when the clause is omitted. Every routine therefore executes with the
-privileges of the creator account (typically `root` during setup).
-
-> **Impact:** Callers (`pt_app`, `pt_public`) have no table grants, so the definer default
-> enables the intended least-privilege model — but makes the security assumption implicit.
+MySQL defaults views, functions, and stored procedures to `SQL SECURITY DEFINER`. Because
+`pt_public`, `pt_app`, and `pt_setup` intentionally have **zero direct base-table grants**,
+`DEFINER` execution is required so callers can access only the vetted procedures and views
+without exposing underlying tables.
 
 ---
 
 ## G. Routines That Lock Rows with FOR UPDATE
 
-**Rating: Yes — four procedures use FOR UPDATE**
+**Rating: Yes — five write procedures use FOR UPDATE inside transactions**
 
-| Procedure | Statement | Evidence |
+| Procedure | Row(s) Locked | Purpose |
 |---|---|---|
-| `sp_record_test` | `SELECT batch_id, status ... FOR UPDATE` on Production_Batches | [03_logic.sql:916-919] |
-| `sp_approve_batch` | `SELECT batch_id, status ... FOR UPDATE` on Production_Batches | [03_logic.sql:991-994] |
-| `sp_reject_batch` | `SELECT batch_id, status ... FOR UPDATE` on Production_Batches | [03_logic.sql:1059-1062] |
-| `sp_issue_recall` | `SELECT batch_id ... FOR UPDATE` on Production_Batches | [03_logic.sql:1146-1149] |
+| `sp_record_test` | `Production_Batches` | Serializes QA test submission and permission check on the batch |
+| `sp_approve_batch` | `Production_Batches` | Prevents concurrent approval / duplicate QR issuance |
+| `sp_reject_batch` | `Production_Batches` | Prevents race between reject and approve |
+| `sp_issue_recall` | `Production_Batches` | Serializes recall creation and status flip |
+| `sp_add_batch_material` | `Production_Batches` + `Material_Deliveries` | Prevents concurrent over-consumption of shared delivery stock |
 
-All four locks are held inside `START TRANSACTION ... COMMIT` blocks. `fn_user_can_manage_batch`
-is called **before** the transaction starts in `sp_record_test`, `sp_approve_batch`,
-`sp_reject_batch`, and `sp_add_batch_material`, creating a brief TOCTOU window.
-[03_logic.sql:908, 980, 1051, 1522]
+All `fn_user_can_manage_batch` checks now run **inside** `START TRANSACTION` after acquiring
+the `FOR UPDATE` row lock, closing the TOCTOU window.
 
 ---
 
@@ -161,10 +152,10 @@ is called **before** the transaction starts in `sp_record_test`, `sp_approve_bat
 
 **Yes**
 
-| Trigger | Event | Action | Evidence |
-|---|---|---|---|
-| `trg_audit_logs_bu` | BEFORE UPDATE on Audit_Logs | SIGNAL '45000' "Audit log is append-only." | [03_logic.sql:557-566] |
-| `trg_audit_logs_bd` | BEFORE DELETE on Audit_Logs | SIGNAL '45000' "Audit log is append-only." | [03_logic.sql:568-581] |
+| Trigger | Event | Action |
+|---|---|---|
+| `trg_audit_logs_bu` | BEFORE UPDATE on Audit_Logs | SIGNAL '45000' "Audit log is append-only." |
+| `trg_audit_logs_bd` | BEFORE DELETE on Audit_Logs | SIGNAL '45000' "Audit log is append-only." |
 
 > **Limitation:** A user with `SUPER` privilege can drop the triggers. True tamper-evidence
 > requires binary log immutability or an out-of-band audit sink.
@@ -173,64 +164,54 @@ is called **before** the transaction starts in `sp_record_test`, `sp_approve_bat
 
 ## I. Can a Delivery Be Over-Used, or Received After the Batch Was Made?
 
-**Rating: No (both are blocked by trigger)**
+**Rating: No (blocked by trigger + delivery-row `FOR UPDATE` lock)**
 
-**Over-use:** `trg_batch_materials_bi` [03_logic.sql:297-366] sums all existing
-`quantity_used_kg` for the delivery and signals an error if
-`(total_used + NEW.quantity_used_kg) > delivered quantity_kg` [03_logic.sql:357-364].
-
-**Received after manufacture:** The same trigger checks `v_deliv_date > v_mfg_date` and
-signals "Delivery received date cannot be after the batch manufacture date." [03_logic.sql:351-354].
-
-> **Caveat — TOCTOU gap:** The aggregate sum is computed without a delivery-row lock.
-> Two concurrent `sp_add_batch_material` calls on the same delivery could both read the same
-> aggregate and both pass. The batch-row `FOR UPDATE` lock prevents concurrent approvals on the
-> same batch but does not prevent two concurrent material-link calls for the same delivery.
+- **Over-use:** `sp_add_batch_material` locks the `Material_Deliveries` row (`FOR UPDATE`)
+  before inserting, and `trg_batch_materials_bi` sums existing `quantity_used_kg` and raises
+  `SIGNAL SQLSTATE '45000'` if `(total_used + NEW.quantity_used_kg) > quantity_kg`.
+- **Received after manufacture:** `trg_batch_materials_bi` rejects any delivery where
+  `received_date > manufacture_date`.
 
 ---
 
 ## J. ON DELETE CASCADE Relationships (Do Not Fire Triggers)
 
-**Yes — four CASCADE paths exist:**
+**Only two intentional master-data CASCADE paths remain:**
 
-| Parent Table | Child Table | Constraint | Effect | Evidence |
-|---|---|---|---|---|
-| Medicines | Drug_Formulations | `fk_df_medicine` | Deleting a Medicine silently deletes all ingredient formulations | [01_schema.sql:191-195] |
-| Medicines | Medicine_Info | `fk_info_medicine` | Deleting a Medicine silently deletes all info rows | [01_schema.sql:214-218] |
-| Production_Batches | Batch_Materials | `fk_bm_batch` | Deleting a batch silently removes all linked material rows | [01_schema.sql:263-267] |
-| Production_Batches | Quality_Test_Reports | `fk_qtr_batch` | Deleting a batch silently removes all QA test reports | [01_schema.sql:294-298] |
+| Parent Table | Child Table | Constraint | Effect |
+|---|---|---|---|
+| Medicines | Drug_Formulations | `fk_df_medicine` | Deleting a Medicine removes its formulation rows |
+| Medicines | Medicine_Info | `fk_info_medicine` | Deleting a Medicine removes its public info rows |
 
-> **Risk:** `trg_batch_materials_bd` (which blocks deletes for non-Pending batches) does **not**
-> fire when `Production_Batches` itself is deleted via CASCADE. `fk_recall_batch` and `fk_qr_batch`
-> both use RESTRICT, so batches with recalls or QR codes are protected — but a Pending batch with
-> materials and no QR codes can be deleted, bypassing all triggers.
+Both operational history constraints — `fk_bm_batch` (`Batch_Materials`) and `fk_qtr_batch`
+(`Quality_Test_Reports`) — now enforce **`ON DELETE RESTRICT`** so batch traceability and
+QA history cannot be silently deleted.
 
 ---
 
 ## K. Columns That Store Derived Data
 
-| Column | Table | Derivation | Evidence |
-|---|---|---|---|
-| `verdict` | Scan_Log | Snapshot of `fn_qr_verdict()` at scan time — may diverge from current batch status | [01_schema.sql:338-339] |
-| `remaining_kg` | v_my_deliveries (view) | Computed: `quantity_kg - SUM(quantity_used_kg)` — not stored | [03_logic.sql:1780] |
-| `qr_count` | v_batch_overview (view) | Computed: `COUNT(qr.qr_id)` — not stored | [03_logic.sql:37] |
+| Column | Table | Derivation |
+|---|---|---|
+| `verdict` | Scan_Log | Snapshot of `fn_qr_verdict()` at scan time — intentional forensic record |
+| `remaining_kg` | v_my_deliveries (view) | Computed: `quantity_kg - SUM(quantity_used_kg)` — not stored |
+| `qr_count` | v_batch_overview (view) | Computed: `COUNT(qr.qr_id)` — not stored |
 
-`Scan_Log.verdict` is the most significant: it preserves the verdict at scan time (e.g.,
-"Genuine") even if the batch is subsequently recalled — intentional for forensic accuracy.
+`Scan_Log.verdict` preserves what the consumer actually saw at scan time (e.g., `Genuine`)
+even if the batch is later recalled.
 
 ---
 
-## Prioritised Suggested Fixes
+## Prioritised Audit Resolution Summary
 
-> This audit contains the original recommendations. The maintenance branch has implemented the items marked **Done**; remaining items require separate domain/security decisions.
-
-| Priority | Fix | Rationale |
+| Status | Item | Notes |
 |---|---|---|
-| **Done** | Add composite index `(batch_id, test_date, report_id)` on `Quality_Test_Reports` | Added to the base schema and non-destructive upgrade. |
-| **Review** | Decide how to prevent duplicate `Medicine_Info` rows | A prefix index on long `TEXT` values can collide for distinct longer strings; define normalization/exact-content semantics before adding a constraint. |
-| **Done** | Move `fn_user_can_manage_batch` call inside the transaction, after `FOR UPDATE` | Batch procedures now lock the batch before checking ownership/active status. |
-| **Review** | Audit the definer privileges of `sp_verify_scan` and `v_demo_codes` | Switching to `SQL SECURITY INVOKER` without base-table privileges would break the least-privilege public account. Use a dedicated least-privilege definer rather than changing security mode blindly. |
-| **Review** | Decide whether QR code matching should be case-sensitive | A binary collation changes current case-insensitive lookup behavior; normalize codes consistently and plan compatibility before migration. |
-| **Done** | Replace `ON DELETE CASCADE` on `fk_bm_batch` and `fk_qtr_batch` with `ON DELETE RESTRICT` | Applied to the base schema and upgrade migration. |
-| **Done** | Add UNIQUE constraint on `Material_Deliveries.certificate_number` | Added to the base schema and upgrade migration, with a duplicate preflight. |
-| **Domain decision** | Consider `UNIQUE (batch_id, ingredient_id)` on `Batch_Materials` | Add only if the business rule prohibits sourcing the same ingredient for one batch from multiple deliveries; the current model may legitimately allow it. |
+| **Done** | Composite index `(batch_id, test_date, report_id)` on `Quality_Test_Reports` | Added in `01_schema.sql` & `09_upgrade_existing.sql`. |
+| **Done** | Unique index `(medicine_id, info_type, info_text(200))` on `Medicine_Info` | Prevents duplicate info rows and speeds up `sp_verify_scan`. |
+| **Done** | Additional query-backed indexes (`uq_supplier_name`, `idx_batches_status_expiry`, `idx_scan_verdict`, `idx_audit_logged_at`, `idx_audit_table_record`) | Optimizes dashboard KPIs, timelines, recent audit, and supplier lookups. |
+| **Done** | Lock batch + delivery rows (`FOR UPDATE`) before ownership/inventory checks | Closes TOCTOU windows in batch and material-link procedures. |
+| **Done** | Replace `ON DELETE CASCADE` on `fk_bm_batch` and `fk_qtr_batch` with `ON DELETE RESTRICT` | Preserves QA and supply-chain traceability records. |
+| **Done** | Add `UNIQUE (certificate_number)` on `Material_Deliveries` | Enforced at schema level, not only in `sp_record_delivery`. |
+| **Intentional** | `SQL SECURITY DEFINER` on views/routines | Required for least-privilege (`pt_public`/`pt_app` have zero base-table grants). |
+| **Intentional** | Case-insensitive `utf8mb4_unicode_ci` on QR codes | Allows case-insensitive manual entry while blocking mixed-case duplicates. |
+| **Domain decision** | Multiple deliveries of the same ingredient per batch | Permitted by PK `(batch_id, delivery_id)` so a batch can draw from two CoA lots of the same API. |

@@ -330,11 +330,11 @@ Permissions are enforced at **two independent layers**:
 |---|---|
 | **Views (16)** | `v_batch_overview`, `v_batch_traceability`, `v_suspicious_codes`, `v_dashboard`, `v_batch_status_counts`, `v_demo_codes`, `v_batch_tests`, `v_recent_audit`, `v_batch_qr_codes`, `v_form_suppliers`, `v_form_ingredients`, `v_form_medicines`, `v_form_factories`, `v_my_deliveries`, `v_batch_timeline`, `v_recall_list` |
 | **Functions (3)** | `fn_recent_scan_count`, `fn_qr_verdict`, `fn_user_can_manage_batch` |
-| **Stored Procedures (12)** | `sp_verify_scan`, `sp_approve_batch`, `sp_reject_batch`, `sp_record_test`, `sp_issue_recall`, `sp_log_event`, `sp_login_lookup`, `sp_set_password`, `sp_record_delivery`, `sp_create_batch`, `sp_add_batch_material`, `sp_change_password` |
+| **Stored Procedures (14)** | `sp_verify_scan`, `sp_approve_batch`, `sp_reject_batch`, `sp_record_test`, `sp_issue_recall`, `sp_log_event`, `sp_login_lookup`, `sp_session_lookup`, `sp_set_password`, `sp_record_delivery`, `sp_create_batch`, `sp_add_batch_material`, `sp_change_password`, `sp_update_suspicious_review` |
 | **Triggers (16)** | `trg_users_bi`, `trg_users_bu`, `trg_batch_materials_bi`, `trg_batch_materials_bu`, `trg_batch_materials_bd`, `trg_qr_codes_bi`, `trg_batches_bi`, `trg_batches_bu`, `trg_batches_au`, `trg_recalls_ai`, `trg_qtr_ai`, `trg_deliveries_ai`, `trg_batches_ai`, `trg_batch_materials_ai`, `trg_audit_logs_bu`, `trg_audit_logs_bd` |
-| **Least Privilege / Grants** | Dedicated `pt_public` and `pt_app` MySQL accounts defined in `db/05_grants.sql` |
-| **Transactions** | `sp_approve_batch`, `sp_reject_batch`, `sp_issue_recall`, `sp_record_delivery`, `sp_create_batch`, `sp_add_batch_material`, `sp_change_password` (`START TRANSACTION / COMMIT / ROLLBACK`) |
-| **Indexing** | `idx_scan_code_time`, `idx_scan_at` on Scan_Log; UNIQUE indexes on `QR_Codes.code`, `Production_Batches.batch_number` |
+| **Least Privilege / Grants** | Dedicated `pt_public`, `pt_app` (`db/05_grants.sql`), and CLI-only `pt_setup` (`db/10_setup_grants.sql`) MySQL accounts |
+| **Transactions** | `sp_approve_batch`, `sp_reject_batch`, `sp_issue_recall`, `sp_record_delivery`, `sp_create_batch`, `sp_add_batch_material`, `sp_change_password`, `sp_update_suspicious_review` (`START TRANSACTION / COMMIT / ROLLBACK` + `FOR UPDATE` row locking) |
+| **Indexing** | `idx_scan_code_time`, `idx_scan_at`, `idx_scan_verdict`, `idx_scan_review_status` on `Scan_Log`; `idx_qtr_batch_latest` on `Quality_Test_Reports`; `idx_batches_status_expiry` on `Production_Batches`; `idx_audit_logged_at` & `idx_audit_table_record` on `Audit_Logs`; UNIQUE indexes on `QR_Codes.code`, `Production_Batches.batch_number`, `Material_Deliveries.certificate_number`, `Suppliers.supplier_name`, `Medicine_Info(medicine_id, info_type, info_text(200))` |
 | **Joins** | INNER JOIN, LEFT JOIN, multi-table (up to 7 tables in v_batch_timeline segments) |
 | **Aggregates** | COUNT, MIN, MAX, SUM, COALESCE |
 | **GROUP BY + HAVING** | `v_suspicious_codes`, `v_batch_overview`, `v_my_deliveries`, `v_batch_qr_codes` |

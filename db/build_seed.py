@@ -625,19 +625,15 @@ def build_sql():
         W(f"VALUES ('{fc}', NULL, '{fd}', 'Suspicious');")
     W("")
 
-    # Suspicious - one valid code (BT-2026-001 pack 1) scanned 12 times over 2 days in Aug 2026 (copied code demo)
-    copied_code = all_qr_codes["BT-2026-001"][0]
-    W(f"-- Suspicious: valid code {copied_code} scanned 12 times in 2 days (copied code demo)")
-    base_times = [
-        "2026-08-14 08:15:00", "2026-08-14 09:30:00", "2026-08-14 11:00:00",
-        "2026-08-14 13:45:00", "2026-08-14 15:20:00", "2026-08-14 17:00:00",
-        "2026-08-14 19:30:00", "2026-08-14 21:00:00",
-        "2026-08-15 07:00:00", "2026-08-15 10:15:00",
-        "2026-08-15 14:30:00", "2026-08-15 18:00:00",
-    ]
-    for t in base_times:
+    # Suspicious - one valid code (BT-2026-001 pack 2) scanned 12 times inside the rolling
+    # 48-hour window so v_suspicious_codes and /app/suspicious.php always show a live copied-code
+    # alert on presentation day while pack 1 (PT360-20515ECBE7F2) remains cleanly Genuine.
+    copied_code = all_qr_codes["BT-2026-001"][1]
+    W(f"-- Suspicious: valid code {copied_code} scanned 12 times in rolling 48h window (copied code demo)")
+    hours_ago = [36, 33, 30, 27, 24, 20, 17, 14, 11, 8, 5, 2]
+    for h in hours_ago:
         W(f"INSERT INTO Scan_Log (scanned_code, qr_id, scanned_at, verdict)")
-        W(f"VALUES ('{copied_code}', {subq_qr(copied_code)}, '{t}', 'Suspicious');")
+        W(f"VALUES ('{copied_code}', {subq_qr(copied_code)}, NOW() - INTERVAL {h} HOUR, 'Suspicious');")
     W("")
 
     # ==== 17. AUDIT_LOGS (SIMULATED) ====
@@ -695,7 +691,7 @@ def build_sql():
     counts["Quality_Test_Reports"] = len(qtr_data)
     counts["QR_Codes"] = len(qr_eligible) * 5
     counts["Product_Recalls"] = 1
-    counts["Scan_Log"] = len(genuine_scans) + 1 + 1 + len(fake_codes) + len(base_times)
+    counts["Scan_Log"] = len(genuine_scans) + 1 + 1 + len(fake_codes) + len(hours_ago)
     counts["Audit_Logs"] = len(audit_entries)
 
     return "\n".join(lines), counts

@@ -59,13 +59,14 @@ All non-key attributes depend only on the full candidate key.
 
 ## 5. Suppliers
 
-**Candidate keys:** {supplier_id}
+**Candidate keys:** {supplier_id}, {supplier_name}
 
 **Functional Dependencies:**
 - supplier_id -> supplier_name, contact_email, contact_phone, address
+- supplier_name -> supplier_id, contact_email, contact_phone, address
 
 **Normal form: BCNF**
-Single-attribute PK; no partial or transitive FDs.
+Both candidate keys are minimal superkeys; no partial or transitive FDs.
 
 ---
 
@@ -85,7 +86,7 @@ Two candidate keys; cas_number depends on either.
 ## 7. Material_Deliveries
 
 **Candidate keys:** {delivery_id}
-(certificate_number is NOT a candidate key — it is nullable in the schema, though `sp_record_delivery` enforces its uniqueness procedurally.)
+(`certificate_number` has `UNIQUE KEY uq_delivery_certificate`, preventing duplicate non-NULL certificates, though the column remains nullable so `delivery_id` is the primary key.)
 
 **Functional Dependencies:**
 - delivery_id -> supplier_id, ingredient_id, manufacturer_id, quantity_kg, received_date, certificate_number
@@ -131,8 +132,7 @@ partial FDs.
 ## 10. Medicine_Info
 
 **Candidate keys:** {info_id}
-(No UNIQUE constraint on (medicine_id, info_type, info_text), so duplicate rows are possible —
-see audit report P2.)
+(`UNIQUE KEY uq_medicine_info_item (medicine_id, info_type, info_text(200))` prevents duplicate info items per medicine and info type.)
 
 **Functional Dependencies:**
 - info_id -> medicine_id, info_type, info_text

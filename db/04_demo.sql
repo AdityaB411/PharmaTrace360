@@ -4,8 +4,8 @@
 -- Runs AFTER 01_schema.sql, 02_seed.sql and 03_logic.sql.
 -- Do NOT store passwords or credentials in this file.
 -- =============================================================
--- HOW TO RUN (from your own Command Prompt):
---   "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p < "E:\DBMS\PharmaTrace360\db\04_demo.sql"
+-- HOW TO RUN (from the repository root):
+--   mysql -u root -p < db\04_demo.sql
 -- =============================================================
 
 USE pharmatrace360;
@@ -41,7 +41,7 @@ SELECT * FROM v_batch_overview;
 SELECT '--- v_batch_traceability ---' AS step;
 SELECT * FROM v_batch_traceability;
 
--- 1c. Suspicious codes: codes scanned more than 5 times
+-- 1c. Suspicious codes: codes scanned more than 10 times in the rolling 48-hour window
 SELECT '--- v_suspicious_codes ---' AS step;
 SELECT * FROM v_suspicious_codes;
 
@@ -102,34 +102,31 @@ CALL sp_verify_scan('TOTALLY-FAKE-CODE-XYZ');
 -- Pass test is recorded.
 -- =============================================================
 
--- 3a. First, INSERT a Pending batch that has NO test at all
---     (we use BT-2026-008 which IS Pending but already has a
---      Pass test; instead we create a brand-new Pending batch
---      with no tests).
---     Actually BT-2026-008 is Pending with a Pass test, and
---     BT-2026-009 is Pending with a Pass test too.
---     To demonstrate the failure, we need a batch with no Pass
---     as the latest test. Let's add a Fail test for BT-2026-009
---     to make its latest test a Fail, then try to approve it.
+-- 3a. BT-2026-008 is a Pending Cipla Ltd batch (owned by rahul.mfr@demo.test)
+--     that already has raw materials linked and a Pass test.
+--     To demonstrate approval rejection when the latest test is Fail, we record
+--     a Fail re-test for BT-2026-008, attempt approval (must FAIL), then record
+--     a Pass re-test and approve it (must SUCCEED).
 
--- Record a Fail test for BT-2026-009 so the latest test is Fail
-SELECT '--- Step 3a: Add a Fail test to BT-2026-009 to make latest = Fail ---' AS step;
+-- Record a Fail test for BT-2026-008 so the latest test is Fail
+SELECT '--- Step 3a: Add a Fail test to BT-2026-008 to make latest = Fail ---' AS step;
 INSERT INTO Quality_Test_Reports (batch_id, tested_by, test_date,
     purity_pct, dissolution_pct, weight_variation_pct, result, remarks)
 VALUES (
-    (SELECT batch_id FROM Production_Batches WHERE batch_number = 'BT-2026-009'),
-    (SELECT user_id FROM Users WHERE email = 'vikram.mfr@demo.test'),
+    (SELECT batch_id FROM Production_Batches WHERE batch_number = 'BT-2026-008'),
+    (SELECT user_id FROM Users WHERE email = 'rahul.mfr@demo.test'),
     '2026-09-25', 86.00, 74.50, 4.80, 'Fail',
     'Re-test failed: dissolution below threshold.'
 );
 
--- Try to approve BT-2026-009 - MUST FAIL because latest test is Fail
-SELECT '--- Step 3b: sp_approve_batch on BT-2026-009 (should FAIL - latest test is Fail) ---' AS step;
+-- Try to approve BT-2026-008 - MUST FAIL because latest test is Fail
+SELECT '--- Step 3b: sp_approve_batch on BT-2026-008 (should FAIL - latest test is Fail) ---' AS step;
 -- We wrap this in a simple error-catching block using a handler
 -- so the demo script continues even after the expected error.
 
 -- MySQL does not support TRY/CATCH in scripts, so we use a
 -- short procedure to catch the error and display the message.
+DROP PROCEDURE IF EXISTS _demo_try_approve_fail;
 DELIMITER //
 CREATE PROCEDURE _demo_try_approve_fail()
 BEGIN
@@ -139,45 +136,45 @@ BEGIN
         GET DIAGNOSTICS CONDITION 1 v_msg = MESSAGE_TEXT;
         SELECT CONCAT('EXPECTED ERROR: ', v_msg) AS error_result;
     END;
-    CALL sp_approve_batch('BT-2026-009',
-        (SELECT user_id FROM Users WHERE email = 'vikram.mfr@demo.test'), 5);
+    CALL sp_approve_batch('BT-2026-008',
+        (SELECT user_id FROM Users WHERE email = 'rahul.mfr@demo.test'), 5);
 END //
 DELIMITER ;
 
 CALL _demo_try_approve_fail();
 DROP PROCEDURE _demo_try_approve_fail;
 
--- 3c. Now record a Pass test for BT-2026-009 (making latest = Pass)
-SELECT '--- Step 3c: Record a Pass test for BT-2026-009 ---' AS step;
+-- 3c. Now record a Pass test for BT-2026-008 (making latest = Pass)
+SELECT '--- Step 3c: Record a Pass test for BT-2026-008 ---' AS step;
 INSERT INTO Quality_Test_Reports (batch_id, tested_by, test_date,
     purity_pct, dissolution_pct, weight_variation_pct, result, remarks)
 VALUES (
-    (SELECT batch_id FROM Production_Batches WHERE batch_number = 'BT-2026-009'),
-    (SELECT user_id FROM Users WHERE email = 'vikram.mfr@demo.test'),
+    (SELECT batch_id FROM Production_Batches WHERE batch_number = 'BT-2026-008'),
+    (SELECT user_id FROM Users WHERE email = 'rahul.mfr@demo.test'),
     '2026-09-30', 98.70, 93.20, 1.90, 'Pass',
     'Re-test passed all parameters.'
 );
 
--- 3d. Approve BT-2026-009 with 5 packs - MUST SUCCEED and create 5 QR codes
-SELECT '--- Step 3d: sp_approve_batch on BT-2026-009 (should SUCCEED) ---' AS step;
-CALL sp_approve_batch('BT-2026-009',
-    (SELECT user_id FROM Users WHERE email = 'vikram.mfr@demo.test'), 5);
+-- 3d. Approve BT-2026-008 with 5 packs - MUST SUCCEED and create 5 QR codes
+SELECT '--- Step 3d: sp_approve_batch on BT-2026-008 (should SUCCEED) ---' AS step;
+CALL sp_approve_batch('BT-2026-008',
+    (SELECT user_id FROM Users WHERE email = 'rahul.mfr@demo.test'), 5);
 
 -- Verify 5 QR codes were created
-SELECT '--- Verify: QR codes for BT-2026-009 ---' AS step;
+SELECT '--- Verify: QR codes for BT-2026-008 ---' AS step;
 SELECT code, issued_at
 FROM QR_Codes
 WHERE batch_id = (SELECT batch_id FROM Production_Batches
-                  WHERE batch_number = 'BT-2026-009');
+                  WHERE batch_number = 'BT-2026-008');
 
 
 -- =============================================================
 -- STEP 4: sp_issue_recall on the newly approved batch
--- Recalls BT-2026-009 and shows the impact result.
+-- Recalls BT-2026-008 and shows the impact result.
 -- =============================================================
 
-SELECT '--- Step 4: sp_issue_recall on BT-2026-009 ---' AS step;
-CALL sp_issue_recall('BT-2026-009',
+SELECT '--- Step 4: sp_issue_recall on BT-2026-008 ---' AS step;
+CALL sp_issue_recall('BT-2026-008',
     'Demo recall: contamination detected in stability study.',
     (SELECT user_id FROM Users WHERE email = 'priya.admin@demo.test'));
 

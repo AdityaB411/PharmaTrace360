@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 function pageHeader(string $title, string $pageTitle = ''): void
 {
+    sendSecurityHeaders(true);
     $role = e($_SESSION['role_name'] ?? '');
     $name = e($_SESSION['full_name'] ?? '');
     $pageTitle = $pageTitle ?: $title;
@@ -77,6 +78,7 @@ function pageFooter(): void
             <div>PharmaTrace 360 &copy; <?= date('Y') ?> &bull; Smart Pharmaceutical Traceability System</div>
         </div>
     </footer>
+    <script src="/assets/vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
     <?php

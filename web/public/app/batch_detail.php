@@ -62,21 +62,6 @@ if (!$batch) {
 $successMsg = null;
 $errorMsg = null;
 
-// Clean up MySQL exception message to display friendly text
-function friendlyDbError(Throwable $e): string
-{
-    $msg = $e->getMessage();
-    // Typical PDO format: "SQLSTATE[45000]: <<custom error>>: 1644 Actual text"
-    if (preg_match('/1644\s+(.+)$/i', $msg, $m)) {
-        return trim($m[1]);
-    }
-    if (str_contains($msg, 'SQLSTATE[45000]')) {
-        $parts = explode(':', $msg);
-        return trim(end($parts));
-    }
-    return 'Action could not be completed due to business rule validation.';
-}
-
 // ─── Handle Form Submissions (Manufacturer only) ─────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 1. Verify role: an admin opening/submitting batch forms must return 403
@@ -170,8 +155,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $stmt = $pdo->prepare('SELECT * FROM v_batch_overview WHERE batch_number = ? AND manufacturer_id = ? LIMIT 1');
         $stmt->execute([$batchNumber, $mfrId]);
-        $batch = $stmt->fetch(PDO::FETCH_ASSOC);
+        $refreshed = $stmt->fetch(PDO::FETCH_ASSOC);
         $stmt->closeCursor();
+        if ($refreshed) {
+            $batch = $refreshed;
+        }
     } catch (Throwable $e) {
         logAppError($e);
     }

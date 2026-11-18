@@ -90,23 +90,33 @@ WHERE batch_number = 'BT-2026-009';
 
 SELECT '=== PROPERTY 2: CONSISTENCY ===' AS property;
 
--- [A] Step 1: Start a transaction.
-START TRANSACTION;
+-- [A] Step 1-3: Start a transaction, attempt an INSERT that violates chk_bm_qty (qty > 0),
+--               catch and display the expected error cleanly so this script runs without -f,
+--               then ROLLBACK to keep the database unchanged.
+DROP PROCEDURE IF EXISTS _demo_acid_consistency;
+DELIMITER //
+CREATE PROCEDURE _demo_acid_consistency()
+BEGIN
+    DECLARE v_msg TEXT;
+    DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+    BEGIN
+        GET DIAGNOSTICS CONDITION 1 v_msg = MESSAGE_TEXT;
+        SELECT CONCAT('EXPECTED ERROR: ', v_msg) AS consistency_check_result;
+    END;
 
--- [A] Step 2: Attempt an INSERT that violates chk_bm_qty (qty > 0).
---             Expected: MySQL signals constraint violation error.
---             The transaction is implicitly in an error state.
--- (Run with -f or catch the error; the statement itself will fail)
-INSERT INTO Batch_Materials (batch_id, delivery_id, quantity_used_kg)
-VALUES (
-    (SELECT batch_id FROM Production_Batches WHERE batch_number = 'BT-2026-009'),
-    (SELECT delivery_id FROM Material_Deliveries WHERE certificate_number = 'COA-2024-0009'),
-    -5.000   -- INVALID: violates CHECK (quantity_used_kg > 0)
-);
--- Expected error: Check constraint 'chk_bm_qty' is violated.
+    START TRANSACTION;
+        INSERT INTO Batch_Materials (batch_id, delivery_id, quantity_used_kg)
+        VALUES (
+            (SELECT batch_id FROM Production_Batches WHERE batch_number = 'BT-2026-009'),
+            (SELECT delivery_id FROM Material_Deliveries WHERE certificate_number = 'COA-2024-0009'),
+            -5.000   -- INVALID: violates CHECK (quantity_used_kg > 0)
+        );
+    ROLLBACK;
+END //
+DELIMITER ;
 
--- [A] Step 3: Roll back the failed transaction to keep the DB clean.
-ROLLBACK;
+CALL _demo_acid_consistency();
+DROP PROCEDURE _demo_acid_consistency;
 
 -- [NOTE] CONSISTENCY CONCLUSION:
 -- The CHECK constraint chk_bm_qty (quantity_used_kg > 0) on

@@ -148,7 +148,7 @@ pageHeader('Dashboard', 'System Overview & Regulator Metrics');
                     <a href="/app/suspicious.php" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-3">
                         <div>
                             <div class="fw-semibold">Suspicious Scan Alerts</div>
-                            <small class="text-muted">High-frequency scans (> 5 scans)</small>
+                            <small class="text-muted">High-frequency scans (&gt; 10 scans in 48 hours)</small>
                         </div>
                         <span class="btn btn-sm btn-outline-danger">&rarr;</span>
                     </a>

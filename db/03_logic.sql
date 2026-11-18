@@ -90,7 +90,7 @@ HAVING COUNT(*) > 10;
 -- v_dashboard
 -- Purpose: A single row with four KPI numbers for the
 --          admin dashboard.
--- Demonstrates: Conditional aggregation with SUM(CASE).
+-- Demonstrates: Scalar subqueries in SELECT list for KPI aggregation.
 -- -------------------------------------------------------
 CREATE OR REPLACE VIEW v_dashboard AS
 SELECT
@@ -118,9 +118,9 @@ GROUP BY pb.status;
 
 -- =============================================================
 -- FUNCTIONS
--- Deterministic helper functions used by procedures and views.
--- Each function is declared with READS SQL DATA because it
--- only reads tables, never modifies them.
+-- Helper functions used by procedures and views.
+-- Declared READS SQL DATA and NOT DETERMINISTIC because they
+-- read live table data and current timestamps (NOW / CURDATE).
 -- =============================================================
 
 -- -------------------------------------------------------
@@ -1753,8 +1753,15 @@ FROM (
     SELECT 'Genuine' AS demo_type, qr.code, pb.batch_number
     FROM QR_Codes qr
     JOIN Production_Batches pb ON pb.batch_id = qr.batch_id
-    WHERE pb.status = 'Approved' AND pb.expiry_date >= CURDATE()
-    ORDER BY pb.manufacture_date ASC
+    WHERE pb.status = 'Approved'
+      AND pb.expiry_date >= CURDATE()
+      AND (
+          SELECT COUNT(*)
+          FROM Scan_Log sl
+          WHERE sl.scanned_code = qr.code
+            AND sl.scanned_at >= NOW() - INTERVAL 48 HOUR
+      ) <= 10
+    ORDER BY pb.manufacture_date ASC, qr.qr_id ASC
     LIMIT 1
 ) AS t_gen
 UNION ALL

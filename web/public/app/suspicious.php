@@ -52,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $successMsg = "Review status for code {$targetCode} updated to {$newStatus}.";
         } catch (Throwable $e) {
             logAppError($e);
-            $errorMsg = 'Could not update review status. If the migration db/06_suspicious_review.sql has not been executed yet, please apply it first.';
+            $errorMsg = 'Could not update review status. Please try again.';
         }
     }
 }
@@ -155,7 +155,7 @@ pageHeader('Suspicious Scans', 'Suspicious QR Code Alerts');
                                 <td class="text-muted"><?= e($s['first_scan']) ?></td>
                                 <td class="text-muted"><?= e($s['last_scan']) ?></td>
                                 <td class="text-center">
-                                    <span class="badge <?= $statusBadgeClass ?> px-2 py-1 fs-7 fw-semibold">
+                                    <span class="badge <?= $statusBadgeClass ?> px-2 py-1 small fw-semibold">
                                         <?= $statusIcon ?><?= e($curStatus) ?>
                                     </span>
                                 </td>
@@ -177,7 +177,7 @@ pageHeader('Suspicious Scans', 'Suspicious QR Code Alerts');
                                     </form>
                                 </td>
                                 <td class="text-end">
-                                    <a href="/?code=<?= urlencode($s['scanned_code']) ?>" target="_blank" class="btn btn-sm btn-outline-danger">
+                                    <a href="/?code=<?= urlencode($s['scanned_code']) ?>" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-danger">
                                         Verify in Portal &rarr;
                                     </a>
                                 </td>

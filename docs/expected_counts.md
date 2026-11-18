@@ -63,5 +63,5 @@ UNION ALL SELECT 'Audit_Logs',         COUNT(*) FROM Audit_Logs;
 | **Expired** | BT-2024-007 | `status = 'Approved'`, `expiry_date = '2026-02-28'` (already past) |
 | **Recalled** | BT-2026-012 | `status = 'Recalled'`, 1 row in `Product_Recalls`, 5 QR codes |
 | **Rejected (re-test)** | BT-2026-010 | 2 rows in `Quality_Test_Reports` (1 Fail, 1 Pass) |
-| **Copied code** | PT360-20515ECBE7F2 | 13 total scans (1 Genuine + 12 Suspicious) |
+| **Copied code** | PT360-2DBC2CDE0F05 | 13 total scans (1 Genuine + 12 Suspicious within rolling 48h window) |
 | **Unknown codes** | FAKE-000000000001, COUNTERFEIT-00002 | `qr_id IS NULL`, verdict `'Suspicious'` |

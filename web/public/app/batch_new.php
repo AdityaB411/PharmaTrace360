@@ -28,22 +28,6 @@ $pdo     = dbApp();
 
 $errorMsg = null;
 
-// Extract clear database SIGNAL message from PDOException
-if (!function_exists('friendlyDbError')) {
-    function friendlyDbError(Throwable $e): string
-    {
-        $msg = $e->getMessage();
-        if (preg_match('/1644\s+(.+)$/i', $msg, $m)) {
-            return trim($m[1]);
-        }
-        if (str_contains($msg, 'SQLSTATE[45000]')) {
-            $parts = explode(':', $msg);
-            return trim(end($parts));
-        }
-        return 'Action could not be completed due to business rule validation.';
-    }
-}
-
 // ─── Handle Batch Creation Submission ────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrf()) {

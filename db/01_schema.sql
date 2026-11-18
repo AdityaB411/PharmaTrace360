@@ -105,7 +105,8 @@ CREATE TABLE Suppliers (
     contact_email   VARCHAR(120),
     contact_phone   VARCHAR(20),
     address         TEXT,
-    PRIMARY KEY (supplier_id)
+    PRIMARY KEY (supplier_id),
+    UNIQUE KEY uq_supplier_name (supplier_name)
 );
 
 -- -------------------------------------------------------
@@ -212,6 +213,7 @@ CREATE TABLE Medicine_Info (
     info_type   ENUM('use','side_effect','avoid_with') NOT NULL,
     info_text   TEXT         NOT NULL,
     PRIMARY KEY (info_id),
+    UNIQUE KEY uq_medicine_info_item (medicine_id, info_type, info_text(200)),
     CONSTRAINT fk_info_medicine
         FOREIGN KEY (medicine_id)
         REFERENCES Medicines (medicine_id)
@@ -236,6 +238,7 @@ CREATE TABLE Production_Batches (
                                   NOT NULL DEFAULT 'Pending',
     PRIMARY KEY (batch_id),
     UNIQUE KEY uq_batch_number (batch_number),  -- also serves as the lookup index for batch_number
+    KEY idx_batches_status_expiry (status, expiry_date),  -- speeds up dashboard KPIs, status counts, and expiry queries
     CONSTRAINT chk_batch_qty   CHECK (quantity_units > 0),
     CONSTRAINT chk_batch_dates CHECK (expiry_date > manufacture_date),
     CONSTRAINT fk_batch_medicine
@@ -352,6 +355,7 @@ CREATE TABLE Scan_Log (
 -- it also replaces a single-column idx_scan_code (leftmost prefix rule).
 CREATE INDEX idx_scan_code_time ON Scan_Log (scanned_code, scanned_at);
 CREATE INDEX idx_scan_at        ON Scan_Log (scanned_at);
+CREATE INDEX idx_scan_verdict   ON Scan_Log (verdict);
 
 -- -------------------------------------------------------
 -- 16. Product_Recalls
@@ -393,6 +397,8 @@ CREATE TABLE Audit_Logs (
     details    TEXT,
     logged_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (log_id),
+    KEY idx_audit_logged_at (logged_at),
+    KEY idx_audit_table_record (table_name, record_id, action),
     CONSTRAINT fk_audit_user
         FOREIGN KEY (user_id)
         REFERENCES Users (user_id)

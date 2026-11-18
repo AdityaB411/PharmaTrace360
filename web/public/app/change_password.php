@@ -72,6 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $chgStmt->fetch(PDO::FETCH_ASSOC);
                 $chgStmt->closeCursor();
 
+                session_regenerate_id(true);
                 $successMsg = 'Your password has been changed successfully.';
             }
         } catch (Throwable $e) {
