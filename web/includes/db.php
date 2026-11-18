@@ -2,7 +2,7 @@
 /**
  * PharmaTrace 360 - Database Connection & Logging Helpers
  *
- * Provides two PDO connections (public and app), error logging,
+ * Provides public, app, and CLI-only setup PDO connections, error logging,
  * demo-code lookup, and session/auth helpers.
  * Never exposes raw database errors or credentials to visitors.
  */
@@ -108,6 +108,34 @@ function dbApp(): PDO
 }
 
 /**
+ * CLI-only setup connection (pt_setup) used by password bootstrap tooling.
+ * Do not call this from request-handling pages.
+ */
+function dbSetup(): PDO
+{
+    static $pdo = null;
+    if ($pdo !== null) {
+        return $pdo;
+    }
+
+    if (PHP_SAPI !== 'cli') {
+        throw new RuntimeException('The setup database connection is available only from CLI tools.');
+    }
+
+    $config = getAppConfig();
+    $db = $config['db'] ?? [];
+    $setup = $db['setup'] ?? [];
+
+    $pdo = new PDO(
+        buildDsn($db),
+        $setup['user'] ?? 'pt_setup',
+        (string)($setup['password'] ?? ''),
+        pdoOptions()
+    );
+    return $pdo;
+}
+
+/**
  * Legacy wrapper — returns the public connection.
  * Kept for backward compatibility with the existing scan page.
  */
@@ -175,10 +203,13 @@ function startSecureSession(): void
         return;
     }
 
+    ini_set('session.use_strict_mode', '1');
+
     session_set_cookie_params([
         'lifetime' => 0,
         'path'     => '/',
-        'httponly'  => true,
+        'secure'   => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+        'httponly' => true,
         'samesite' => 'Lax',
     ]);
 
@@ -224,6 +255,31 @@ function requireRole($roles): void
         header('Location: /login.php');
         exit;
     }
+
+    try {
+        $pdo = dbApp();
+        $stmt = $pdo->prepare('CALL sp_session_lookup(?)');
+        $stmt->execute([(int)$_SESSION['user_id']]);
+        $account = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+    } catch (Throwable $ex) {
+        logAppError($ex);
+        http_response_code(503);
+        echo 'Service temporarily unavailable. Please try again shortly.';
+        exit;
+    }
+
+    if (!$account || (int)$account['is_active'] !== 1) {
+        $_SESSION = [];
+        session_destroy();
+        header('Location: /login.php');
+        exit;
+    }
+
+    $_SESSION['role_name'] = $account['role_name'];
+    $_SESSION['manufacturer_id'] = $account['manufacturer_id'] !== null
+        ? (int)$account['manufacturer_id']
+        : null;
 
     $allowed = is_array($roles) ? $roles : [$roles];
     if (!in_array($_SESSION['role_name'], $allowed, true)) {

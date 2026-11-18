@@ -11,6 +11,12 @@ require_once __DIR__ . '/../includes/db.php';
 
 startSecureSession();
 
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !verifyCsrf()) {
+    http_response_code(405);
+    header('Allow: POST');
+    exit('Invalid logout request.');
+}
+
 if (!empty($_SESSION['user_id'])) {
     try {
         $pdo  = dbApp();

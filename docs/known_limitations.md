@@ -55,12 +55,10 @@ The raw data files (`Extensive_A_Z_medicines_dataset_of_India.csv` and `medicine
 
 ## 5. QR Codes are Random / Unique, Not Digitally Signed
 
-- **Current Implementation:** QR codes in PharmaTrace 360 are unique 12-character hexadecimal identifiers prefixed with `PT360-` (e.g. `PT360-20515ECBE7F2`), generated using `MD5(UUID())` or `uuid5`.
-- **Limitation:** The codes are pseudorandom tokens stored in the database. They do **not** contain an embedded asymmetric cryptographic digital signature (such as an ECDSA or RSA signature signed by the manufacturer's private key).
-- **Security Implications:** Verification relies on an active online database query (`sp_verify_scan`). Offline verification (e.g. verifying a signature with a public key without internet access) is not supported.
-- **Counterfeit Mitigation:** Tampering and code duplication are detected through database-side anomaly detection (flagging unissued codes and codes scanned more than 10 times in 48 hours via `fn_qr_verdict` and `v_suspicious_codes`).
-
----
+- **Current Implementation:** Runtime QR tokens use 128 bits from MySQL `RANDOM_BYTES(16)` and are prefixed with `PT360-`. Seeded demo tokens are deterministic so test data is reproducible.
+- **Limitation:** Codes are stored in the database and do **not** contain an embedded asymmetric cryptographic digital signature. Offline verification is not supported.
+- **Security Implications:** Verification relies on an active online database query (`sp_verify_scan`).
+- **Counterfeit Mitigation:** The system flags unknown codes and codes scanned more than 10 times in a rolling 48-hour window. Public rate limiting remains a deployment requirement.
 
 ## 6. No Rate Limiting on the Public Scan Page
 
@@ -82,19 +80,17 @@ A common question is why `Scan_Log.verdict` is recorded as a static `ENUM('Genui
 
 ## 8. Web Security & Session Architecture Limitations (Demo Only)
 
-- **No Account Lockout or Rate Limiting on Login:** The staff login page (`web/public/login.php`) logs failed authentication attempts via `sp_log_event`, but does not enforce automatic account lockout or IP rate limiting after consecutive failed login attempts (failed attempts are only logged). In production, an account lockout mechanism or an external rate-limiting reverse proxy would be required to prevent automated brute-force attacks.
-- **Default File Session Storage:** Sessions use the PHP default file storage (`session.save_handler = files`). While cookies are restricted with `HttpOnly` and `SameSite=Lax` along with a 30-minute idle expiration, an enterprise high-availability environment would require a distributed, encrypted session store such as Redis.
-- **Plain HTTP (Local Demo Only):** The site is served over plain HTTP (`php -S localhost:8000`) for local development and academic evaluation. Production deployment requires HTTPS / TLS termination to encrypt session cookies and authentication payloads across the network.
+- **No Account Lockout or Rate Limiting on Login:** Failed attempts are logged but not automatically rate-limited or locked out. Production deployment should add application or reverse-proxy rate limits.
+- **Default File Session Storage:** Sessions use PHP's default file storage. Cookies are HttpOnly, SameSite=Lax, Secure when HTTPS is detected, and sessions expire after 30 minutes of inactivity. High-availability deployment would need a shared session store.
+- **Plain HTTP (Local Demo Only):** The local PHP server uses HTTP. Production deployment requires HTTPS/TLS.
+- **Shared Application Database Identity:** `pt_app` is shared by all logged-in staff. Stored procedures receive the application-supplied user ID, so the database cannot independently prove which staff member initiated a call. The PHP layer performs session and role checks; production should use a stronger trusted identity boundary.
+- **Authentication Hash Boundary:** `sp_login_lookup` returns the selected user's password hash to PHP so `password_verify()` can run. A holder of the shared `pt_app` database credentials could call it for other email addresses and retrieve their hashes; the same shared identity also cannot independently prove which user requested `sp_change_password`. Keep DB credentials server-only and use a separate authentication service/credential boundary in production.
 
----
+## 9. CLI-Only Password Bootstrap
 
-## 9. Stored Procedure `sp_set_password` Granted to `pt_app`
-
-- In the database privilege configuration (`db/05_grants.sql`), the database user `pt_app` is granted `EXECUTE` privilege on `sp_set_password`.
-- **Limitation:** Only the command-line administration tool (`web/tools/set_password.php`) requires `sp_set_password` to establish demo account credentials after database initialization.
-- **Production Distinction:** In a production system, `pt_app` (the database user used by the routine staff web portal) would never have execution access to password administration procedures. A separate dedicated database administrator or migration account would be used to manage user credentials.
-
----
+- The normal web application account `pt_app` is not granted `EXECUTE` on `sp_set_password`.
+- The CLI-only `pt_setup` account receives that permission through `db/10_setup_grants.sql` and is used only by `web/tools/set_password.php`.
+- Keep `pt_setup` credentials local and never configure them in a web-facing database connection.
 
 ## 10. Master Data Loaded Exclusively via SQL Scripts (No UI Screens)
 
@@ -120,7 +116,20 @@ A common question is why `Scan_Log.verdict` is recorded as a static `ENUM('Genui
 
 ---
 
-## 13. Absolute Paths in `00_reset_all.sql`
+## 13. Reset and Upgrade Paths
 
-- The master reset script `db/00_reset_all.sql` uses hardcoded absolute Windows file paths (e.g., `SOURCE E:/DBMS/PharmaTrace360/db/01_schema.sql;`) to source child scripts sequentially from the MySQL CLI.
-- **Limitation:** If the project directory is moved to another folder, different drive letter, or cloned to a different machine, `00_reset_all.sql` must be edited by hand to update the absolute paths before running the reset.
+- `db/00_reset_all.sql` uses relative `SOURCE db/...` paths and must be run from the repository root.
+- The reset script is destructive and intended only for fresh demo installs. Existing installations should review and use `db/09_upgrade_existing.sql`, which preserves rows but can stop safely if legacy duplicate certificate numbers prevent the new unique index from being created.
+
+
+
+
+
+
+---
+
+## 14. QA Acceptance Thresholds
+
+- The database validates that QA measurements are present and within the allowed numeric range, and that the submitted result is `Pass` or `Fail`.
+- The project does not define a verified product-specific purity, dissolution, or weight-variation acceptance specification. The database therefore does not invent numerical thresholds or automatically derive a Pass/Fail result from those measurements.
+- Before using this workflow beyond a classroom demo, define documented acceptance criteria for each product and enforce those criteria in the QA workflow.

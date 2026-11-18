@@ -30,6 +30,7 @@ web/config.local.php
 web/logs/
 *.log
 
-# Database backups
-db/backup/
+# Database backups and exported snapshots
+/db/backup/
+/backups/*.sql
 *.sql.gz

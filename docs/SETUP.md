@@ -57,43 +57,33 @@ cd /d E:\DBMS\PharmaTrace360
 
 ## 3. Create the Database Users by Hand
 
-The system enforces least privilege using two dedicated MySQL accounts:
-- `pt_public`: Used by anonymous public scan visitors.
-- `pt_app`: Used by staff logins.
+The project uses three dedicated MySQL accounts:
+- `pt_public`: anonymous public QR verification.
+- `pt_app`: authenticated staff portal; procedures and views only.
+- `pt_setup`: CLI-only password bootstrap tool. Do not use it in the web application.
 
-Log in to MySQL as root in your Command Prompt:
+Log in to MySQL as root:
 ```cmd
 mysql -u root -p
 ```
-Enter your MySQL root password when prompted.
 
-Run the following SQL commands to create the two user accounts. **Choose your own passwords and replace the placeholders:**
-
+Create each account with a strong, unique password of your choice:
 ```sql
-CREATE USER 'pt_public'@'localhost' IDENTIFIED BY '<TYPE_YOUR_PT_PUBLIC_PASSWORD_HERE>';
-CREATE USER 'pt_app'@'localhost'    IDENTIFIED BY '<TYPE_YOUR_PT_APP_PASSWORD_HERE>';
+CREATE USER 'pt_public'@'localhost' IDENTIFIED BY '<YOUR_PT_PUBLIC_PASSWORD>';
+CREATE USER 'pt_app'@'localhost' IDENTIFIED BY '<YOUR_PT_APP_PASSWORD>';
+CREATE USER 'pt_setup'@'localhost' IDENTIFIED BY '<YOUR_PT_SETUP_PASSWORD>';
 EXIT;
 ```
 
-> [!IMPORTANT]
-> The placeholders `<TYPE_YOUR_PT_PUBLIC_PASSWORD_HERE>` and `<TYPE_YOUR_PT_APP_PASSWORD_HERE>` must be replaced by you when typing the commands into MySQL. Never store these passwords in any tracked files.
+Do not put real passwords in tracked files. Enter these passwords only in your local `web/config.local.php` file and when running the SQL commands.
 
 ---
 
-## 4. Fix Paths in `00_reset_all.sql`
+## 4. Reset Script Paths
 
-The master reset script [db/00_reset_all.sql](file:///e:/DBMS/PharmaTrace360/db/00_reset_all.sql) uses absolute paths to execute its child SQL scripts sequentially.
+The reset script uses relative `SOURCE db/...` paths, so you do not need to edit it for your machine. Run the following commands **from the repository root** (the folder containing `db` and `web`).
 
-1. Open `db/00_reset_all.sql` in a text editor.
-2. Ensure the four `SOURCE` lines match your actual project folder location on Windows, using **forward slashes** (`/`):
-   ```sql
-   SOURCE E:/DBMS/PharmaTrace360/db/01_schema.sql;
-   SOURCE E:/DBMS/PharmaTrace360/db/02_seed.sql;
-   SOURCE E:/DBMS/PharmaTrace360/db/03_logic.sql;
-   SOURCE E:/DBMS/PharmaTrace360/db/05_grants.sql;
-   ```
-   *(If your project is at `C:/PharmaTrace360`, update all paths to `C:/PharmaTrace360/db/...`).*
-3. Save the file.
+**Warning:** `db/00_reset_all.sql` drops and recreates the database. It is for a fresh demo install only; it destroys existing data.
 
 ---
 
@@ -110,10 +100,11 @@ Enter your MySQL root password when prompted.
 
 This script will:
 1. Re-create the `pharmatrace360` database.
-2. Build all 17 tables, primary keys, foreign keys, and indexes (`01_schema.sql`).
-3. Load the initial 390 seed rows (`02_seed.sql`).
-4. Install all views, functions, triggers, and stored procedures (`03_logic.sql`).
-5. Grant least-privilege permissions to `pt_public` and `pt_app` (`05_grants.sql`).
+2. Build the tables, constraints, foreign keys, and indexes (`01_schema.sql`).
+3. Load the simulated seed data (`02_seed.sql`).
+4. Install views, functions, triggers, and stored procedures (`03_logic.sql`).
+5. Install suspicious-code review support (`06_suspicious_review.sql`).
+6. Grant least-privilege permissions to `pt_public` and `pt_app` (`05_grants.sql`).
 
 Output should end with:
 ```
@@ -121,6 +112,16 @@ Database reset complete! 17 tables and logic installed successfully.
 ```
 
 ---
+
+### Existing installation: non-destructive upgrade
+
+If you already have a working database and need to preserve its rows, **do not run** `db/00_reset_all.sql`. From the repository root, first take your own database backup, then run:
+
+```cmd
+mysql -u root -p < db\\09_upgrade_existing.sql
+```
+
+The upgrade recreates routines/views and adds indexes/recall timestamps without dropping or reseeding data. It checks for duplicate certificate numbers before changing the schema; if duplicates are found, resolve them and rerun the upgrade. Afterward, create the CLI-only `pt_setup` account if needed, add its credentials under `db.setup` in your local config, and run `mysql -u root -p < db\\10_setup_grants.sql` to restore its password-bootstrap permission. Keep the output and verify the application before using it again.
 
 ## 6. Create `config.local.php`
 
@@ -148,7 +149,13 @@ Database reset complete! 17 tables and logic installed successfully.
            // pt_app: staff portal (procedures + views only)
            'app' => [
                'user'     => 'pt_app',
-               'password' => '<TYPE_YOUR_PT_APP_PASSWORD_HERE>',
+               'password' => '<YOUR_PT_APP_PASSWORD>',
+           ],
+
+           // pt_setup: CLI-only password setup
+           'setup' => [
+               'user'     => 'pt_setup',
+               'password' => '<YOUR_PT_SETUP_PASSWORD>',
            ],
        ],
        // Set to true to display sample QR codes on the public portal
@@ -158,13 +165,18 @@ Database reset complete! 17 tables and logic installed successfully.
 4. Save the file.
 
 > [!NOTE]
-> `web/config.local.php` is explicitly ignored by `.gitignore`. It contains your local credentials and must never be shared or committed.
+After saving the config, grant the CLI-only setup account permission to call the password bootstrap procedure:
+```cmd
+mysql -u root -p < db\\10_setup_grants.sql
+```
+
+> `web/config.local.php` is ignored by Git. It contains local credentials and must never be shared or committed.
 
 ---
 
 ## 7. Set Demo User Passwords
 
-The database seed inserts users with disabled placeholder hashes (`!`). Use the included command-line utility [web/tools/set_password.php](file:///e:/DBMS/PharmaTrace360/web/tools/set_password.php) to set real bcrypt hashes for the demo accounts:
+The database seed inserts users with disabled placeholder hashes (`!`). Use the included command-line utility [web/tools/set_password.php](../web/tools/set_password.php) to set real bcrypt hashes for the demo accounts:
 
 ```cmd
 php web\tools\set_password.php

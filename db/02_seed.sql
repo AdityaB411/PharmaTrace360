@@ -715,8 +715,8 @@ VALUES ('PT360-061D12F1AA50', (SELECT batch_id FROM Production_Batches WHERE bat
 -- -------------------------------------------------------
 -- 15. Product_Recalls  (SIMULATED - 1 recall for BT-2026-012)
 -- -------------------------------------------------------
-INSERT INTO Product_Recalls (batch_id, reason, recall_date, issued_by)
-VALUES ((SELECT batch_id FROM Production_Batches WHERE batch_number = 'BT-2026-012'), 'Unexpected impurity detected in post-market stability testing. Precautionary recall pending further investigation.', '2026-09-15', (SELECT user_id FROM Users WHERE email = 'priya.admin@demo.test'));
+INSERT INTO Product_Recalls (batch_id, reason, recall_date, issued_by, issued_at)
+VALUES ((SELECT batch_id FROM Production_Batches WHERE batch_number = 'BT-2026-012'), 'Unexpected impurity detected in post-market stability testing. Precautionary recall pending further investigation.', '2026-09-15', (SELECT user_id FROM Users WHERE email = 'priya.admin@demo.test'), '2026-09-15 00:00:00');
 
 -- -------------------------------------------------------
 -- 16. Scan_Log  (SIMULATED - hard-coded demo scans)

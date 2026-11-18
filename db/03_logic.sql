@@ -71,9 +71,9 @@ JOIN Suppliers           s   ON s.supplier_id      = md.supplier_id;
 
 -- -------------------------------------------------------
 -- v_suspicious_codes
--- Purpose: Flag QR codes that have been scanned more
---          than 5 times - a sign of counterfeiting.
--- Demonstrates: GROUP BY, HAVING, MIN/MAX aggregates.
+-- Purpose: Flag QR codes with more than 10 scans in the
+--          rolling 48-hour window, matching fn_qr_verdict.
+-- Demonstrates: time-window filtering, GROUP BY, HAVING.
 -- -------------------------------------------------------
 CREATE OR REPLACE VIEW v_suspicious_codes AS
 SELECT
@@ -82,8 +82,9 @@ SELECT
     MIN(sl.scanned_at)  AS first_scan,
     MAX(sl.scanned_at)  AS last_scan
 FROM Scan_Log sl
+WHERE sl.scanned_at >= NOW() - INTERVAL 48 HOUR
 GROUP BY sl.scanned_code
-HAVING COUNT(*) > 5;
+HAVING COUNT(*) > 10;
 
 -- -------------------------------------------------------
 -- v_dashboard
@@ -136,7 +137,7 @@ CREATE FUNCTION fn_recent_scan_count(
 )
 RETURNS INT
 READS SQL DATA
-DETERMINISTIC
+NOT DETERMINISTIC
 BEGIN
     DECLARE v_count INT DEFAULT 0;
     SELECT COUNT(*) INTO v_count
@@ -170,7 +171,7 @@ CREATE FUNCTION fn_qr_verdict(
 )
 RETURNS VARCHAR(20)
 READS SQL DATA
-DETERMINISTIC
+NOT DETERMINISTIC
 BEGIN
     DECLARE v_batch_id     INT UNSIGNED;
     DECLARE v_status       VARCHAR(10);
@@ -507,6 +508,31 @@ BEGIN
         SET MESSAGE_TEXT = 'A recalled batch cannot change status.';
     END IF;
 
+    -- Approval is a one-way transition from Pending only.
+    IF NEW.status = 'Approved' AND OLD.status != 'Pending' THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Only Pending batches can be approved.';
+    END IF;
+
+    -- Rejection is only valid from Pending and requires a failed latest test.
+    IF NEW.status = 'Rejected' AND OLD.status != 'Pending' THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Only Pending batches can be rejected.';
+    END IF;
+
+    IF NEW.status = 'Rejected' AND OLD.status = 'Pending' THEN
+        SELECT result INTO v_latest_result
+        FROM Quality_Test_Reports
+        WHERE batch_id = NEW.batch_id
+        ORDER BY test_date DESC, report_id DESC
+        LIMIT 1;
+
+        IF v_latest_result IS NULL OR v_latest_result != 'Fail' THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Cannot reject batch: the most recent quality test is not Fail.';
+        END IF;
+    END IF;
+
     -- Rule A: approval requires latest test = Pass AND at least one material linked
     IF NEW.status = 'Approved' AND OLD.status != 'Approved' THEN
         SELECT result INTO v_latest_result
@@ -833,6 +859,7 @@ BEGIN
     IF v_qr_id IS NULL THEN
         -- Unknown code: return only the verdict
         SELECT v_verdict AS verdict,
+               (SELECT COUNT(*) FROM Scan_Log WHERE scanned_code = p_code) AS scan_count,
                'Demo data - general information only, ask a doctor or pharmacist.' AS advisory;
     ELSE
         -- Result set 1: main medicine info
@@ -848,6 +875,7 @@ BEGIN
             m.storage_note,
             pr.reason           AS recall_reason,
             pr.recall_date      AS recall_date,
+            (SELECT COUNT(*) FROM Scan_Log WHERE scanned_code = p_code) AS scan_count,
             'Demo data - general information only, ask a doctor or pharmacist.' AS advisory
         FROM Production_Batches pb
         JOIN Medicines          m   ON m.medicine_id       = pb.medicine_id
@@ -900,15 +928,10 @@ BEGIN
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         GET DIAGNOSTICS CONDITION 1 v_err_msg = MESSAGE_TEXT;
+        SET @app_user_id = NULL;
         ROLLBACK;
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_err_msg;
     END;
-
-    -- Permission check
-    IF fn_user_can_manage_batch(p_user_id, p_batch_number) != 1 THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Permission denied: you cannot manage this batch.';
-    END IF;
 
     START TRANSACTION;
 
@@ -923,9 +946,32 @@ BEGIN
             SET MESSAGE_TEXT = 'Batch not found.';
         END IF;
 
+        IF fn_user_can_manage_batch(p_user_id, p_batch_number) != 1 THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Permission denied: you cannot manage this batch.';
+        END IF;
+
         IF v_status != 'Pending' THEN
             SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Tests can only be recorded for Pending batches.';
+        END IF;
+
+        IF p_purity IS NULL OR p_dissolution IS NULL OR p_weight_variation IS NULL
+           OR p_purity < 0 OR p_purity > 100
+           OR p_dissolution < 0 OR p_dissolution > 100
+           OR p_weight_variation < 0 OR p_weight_variation > 100 THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'QA measurements are required and must be between 0 and 100.';
+        END IF;
+
+        IF p_result IS NULL OR p_result NOT IN ('Pass', 'Fail') THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Test result must be Pass or Fail.';
+        END IF;
+
+        IF p_remarks IS NULL OR TRIM(p_remarks) = '' THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'QA remarks are required.';
         END IF;
 
         SET @app_user_id = p_user_id;
@@ -962,8 +1008,9 @@ CREATE PROCEDURE sp_approve_batch(
     IN p_pack_count   INT UNSIGNED
 )
 BEGIN
-    DECLARE v_batch_id INT UNSIGNED;
-    DECLARE v_status   VARCHAR(10);
+    DECLARE v_batch_id INT UNSIGNED DEFAULT NULL;
+    DECLARE v_status   VARCHAR(10) DEFAULT NULL;
+    DECLARE v_quantity_units INT UNSIGNED DEFAULT NULL;
     DECLARE v_i        INT DEFAULT 0;
     DECLARE v_code     VARCHAR(64);
     DECLARE v_err_msg  TEXT;
@@ -972,23 +1019,16 @@ BEGIN
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         GET DIAGNOSTICS CONDITION 1 v_err_msg = MESSAGE_TEXT;
+        SET @app_user_id = NULL;
         ROLLBACK;
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_err_msg;
     END;
 
-    -- Permission check
-    IF fn_user_can_manage_batch(p_user_id, p_batch_number) != 1 THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Permission denied: you cannot manage this batch.';
-    END IF;
-
-    -- Set audit user for AFTER triggers
-    SET @app_user_id = p_user_id;
-
     START TRANSACTION;
 
-        -- Look up and lock the batch
-        SELECT batch_id, status INTO v_batch_id, v_status
+        -- Lock the batch before checking permission and state.
+        SELECT batch_id, status, quantity_units
+        INTO v_batch_id, v_status, v_quantity_units
         FROM Production_Batches
         WHERE batch_number = p_batch_number
         FOR UPDATE;
@@ -998,6 +1038,28 @@ BEGIN
             SET MESSAGE_TEXT = 'Batch not found.';
         END IF;
 
+        IF fn_user_can_manage_batch(p_user_id, p_batch_number) != 1 THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Permission denied: you cannot manage this batch.';
+        END IF;
+
+        IF v_status != 'Pending' THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Only Pending batches can be approved.';
+        END IF;
+
+        IF p_pack_count IS NULL OR p_pack_count < 1 OR p_pack_count > 50 THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Pack count must be between 1 and 50.';
+        END IF;
+
+        IF p_pack_count > v_quantity_units THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Pack count cannot exceed the batch production quantity.';
+        END IF;
+
+        SET @app_user_id = p_user_id;
+
         -- Update status (BEFORE UPDATE trigger checks latest test and materials)
         UPDATE Production_Batches
         SET status = 'Approved'
@@ -1005,7 +1067,7 @@ BEGIN
 
         -- Generate QR codes
         WHILE v_i < p_pack_count DO
-            SET v_code = CONCAT('PT360-', UPPER(LEFT(MD5(UUID()), 12)));
+            SET v_code = CONCAT('PT360-', UPPER(HEX(RANDOM_BYTES(16))));
             INSERT INTO QR_Codes (code, batch_id) VALUES (v_code, v_batch_id);
             SET v_i = v_i + 1;
         END WHILE;
@@ -1043,15 +1105,10 @@ BEGIN
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         GET DIAGNOSTICS CONDITION 1 v_err_msg = MESSAGE_TEXT;
+        SET @app_user_id = NULL;
         ROLLBACK;
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_err_msg;
     END;
-
-    -- Permission check
-    IF fn_user_can_manage_batch(p_user_id, p_batch_number) != 1 THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Permission denied: you cannot manage this batch.';
-    END IF;
 
     START TRANSACTION;
 
@@ -1064,6 +1121,11 @@ BEGIN
         IF v_batch_id IS NULL THEN
             SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Batch not found.';
+        END IF;
+
+        IF fn_user_can_manage_batch(p_user_id, p_batch_number) != 1 THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Permission denied: you cannot manage this batch.';
         END IF;
 
         IF v_status != 'Pending' THEN
@@ -1112,7 +1174,8 @@ CREATE PROCEDURE sp_issue_recall(
     IN p_user_id      INT UNSIGNED
 )
 BEGIN
-    DECLARE v_batch_id    INT UNSIGNED;
+    DECLARE v_batch_id    INT UNSIGNED DEFAULT NULL;
+    DECLARE v_status      VARCHAR(10) DEFAULT NULL;
     DECLARE v_err_msg     TEXT;
     DECLARE v_user_active TINYINT DEFAULT 0;
     DECLARE v_user_role   VARCHAR(30) DEFAULT '';
@@ -1121,29 +1184,34 @@ BEGIN
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         GET DIAGNOSTICS CONDITION 1 v_err_msg = MESSAGE_TEXT;
+        SET @app_user_id = NULL;
         ROLLBACK;
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_err_msg;
     END;
 
-    -- Permission check: user must be active Admin/Regulator
-    SELECT u.is_active, r.role_name
-    INTO v_user_active, v_user_role
-    FROM Users u
-    JOIN Roles r ON r.role_id = u.role_id
-    WHERE u.user_id = p_user_id;
-
-    IF v_user_active != 1 OR v_user_role != 'Admin/Regulator' THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Permission denied: only active Admin/Regulator users can issue recalls.';
+    IF p_reason IS NULL OR TRIM(p_reason) = '' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Recall reason is required.';
     END IF;
-
-    -- Set audit user for AFTER triggers
-    SET @app_user_id = p_user_id;
 
     START TRANSACTION;
 
+        -- Lock and validate the acting user inside the transaction.
+        SELECT u.is_active, r.role_name
+        INTO v_user_active, v_user_role
+        FROM Users u
+        JOIN Roles r ON r.role_id = u.role_id
+        WHERE u.user_id = p_user_id
+        FOR UPDATE;
+
+        IF v_user_active != 1 OR v_user_role != 'Admin/Regulator' THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Permission denied: only active Admin/Regulator users can issue recalls.';
+        END IF;
+
+        SET @app_user_id = p_user_id;
+
         -- Look up and lock the batch
-        SELECT batch_id INTO v_batch_id
+        SELECT batch_id, status INTO v_batch_id, v_status
         FROM Production_Batches
         WHERE batch_number = p_batch_number
         FOR UPDATE;
@@ -1151,6 +1219,11 @@ BEGIN
         IF v_batch_id IS NULL THEN
             SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Batch not found.';
+        END IF;
+
+        IF v_status = 'Recalled' THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'This batch has already been recalled.';
         END IF;
 
         -- Insert recall row FIRST (so the BEFORE UPDATE trigger can find it)
@@ -1170,21 +1243,20 @@ BEGIN
     -- Return impact report
     SELECT
         pb.batch_number,
-        m.brand_name          AS medicine,
-        s.supplier_name       AS supplier,
-        md.certificate_number,
-        (SELECT COUNT(*) FROM QR_Codes WHERE batch_id = v_batch_id)
-                              AS qr_count,
+        m.brand_name AS medicine,
+        GROUP_CONCAT(DISTINCT s.supplier_name ORDER BY s.supplier_name SEPARATOR ', ') AS supplier,
+        GROUP_CONCAT(DISTINCT md.certificate_number ORDER BY md.certificate_number SEPARATOR ', ') AS certificate_number,
+        (SELECT COUNT(*) FROM QR_Codes WHERE batch_id = v_batch_id) AS qr_count,
         (SELECT COUNT(*) FROM Scan_Log sl
          JOIN QR_Codes qr ON qr.qr_id = sl.qr_id
-         WHERE qr.batch_id = v_batch_id)
-                              AS total_scans
-    FROM Production_Batches  pb
-    JOIN Medicines           m   ON m.medicine_id    = pb.medicine_id
-    LEFT JOIN Batch_Materials bm ON bm.batch_id      = pb.batch_id
+         WHERE qr.batch_id = v_batch_id) AS total_scans
+    FROM Production_Batches pb
+    JOIN Medicines m ON m.medicine_id = pb.medicine_id
+    LEFT JOIN Batch_Materials bm ON bm.batch_id = pb.batch_id
     LEFT JOIN Material_Deliveries md ON md.delivery_id = bm.delivery_id
-    LEFT JOIN Suppliers      s   ON s.supplier_id    = md.supplier_id
-    WHERE pb.batch_id = v_batch_id;
+    LEFT JOIN Suppliers s ON s.supplier_id = md.supplier_id
+    WHERE pb.batch_id = v_batch_id
+    GROUP BY pb.batch_number, m.brand_name;
 END //
 DELIMITER ;
 
@@ -1208,6 +1280,25 @@ DELIMITER ;
 
 
 -- -------------------------------------------------------
+-- sp_session_lookup
+-- Revalidates active account and role for every protected request.
+-- -------------------------------------------------------
+DROP PROCEDURE IF EXISTS sp_session_lookup;
+DELIMITER //
+CREATE PROCEDURE sp_session_lookup(
+    IN p_user_id INT UNSIGNED
+)
+BEGIN
+    SELECT u.user_id, u.is_active, r.role_name, u.manufacturer_id
+    FROM Users u
+    JOIN Roles r ON r.role_id = u.role_id
+    WHERE u.user_id = p_user_id
+    LIMIT 1;
+END //
+DELIMITER ;
+
+
+-- -------------------------------------------------------
 -- sp_login_lookup
 -- Returns the columns needed for PHP login verification.
 -- Returns at most one row.
@@ -1218,7 +1309,7 @@ CREATE PROCEDURE sp_login_lookup(
     IN p_email VARCHAR(120)
 )
 BEGIN
-    SELECT u.user_id, u.email, u.password_hash,
+    SELECT u.user_id, u.full_name, u.email, u.password_hash,
            r.role_name, u.manufacturer_id, u.is_active
     FROM Users u
     JOIN Roles r ON r.role_id = u.role_id
@@ -1248,6 +1339,11 @@ BEGIN
     IF v_found = 0 THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'No user found with that email.';
+    END IF;
+
+    IF p_hash IS NULL OR CHAR_LENGTH(p_hash) < 60 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Password hash is too short. A valid password hash is required.';
     END IF;
 
     UPDATE Users
@@ -1288,6 +1384,7 @@ BEGIN
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         GET DIAGNOSTICS CONDITION 1 v_err_msg = MESSAGE_TEXT;
+        SET @app_user_id = NULL;
         ROLLBACK;
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_err_msg;
     END;
@@ -1401,6 +1498,7 @@ BEGIN
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         GET DIAGNOSTICS CONDITION 1 v_err_msg = MESSAGE_TEXT;
+        SET @app_user_id = NULL;
         ROLLBACK;
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_err_msg;
     END;
@@ -1507,41 +1605,27 @@ CREATE PROCEDURE sp_add_batch_material(
 )
 BEGIN
     DECLARE v_batch_id     INT UNSIGNED DEFAULT NULL;
-    DECLARE v_status       VARCHAR(10) DEFAULT '';
+    DECLARE v_status       VARCHAR(10) DEFAULT NULL;
     DECLARE v_delivery_id  INT UNSIGNED DEFAULT NULL;
     DECLARE v_err_msg      TEXT;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         GET DIAGNOSTICS CONDITION 1 v_err_msg = MESSAGE_TEXT;
+        SET @app_user_id = NULL;
         ROLLBACK;
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_err_msg;
     END;
 
-    -- Permission check
-    IF fn_user_can_manage_batch(p_user_id, p_batch_number) != 1 THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Permission denied: you cannot manage this batch.';
-    END IF;
-
-    -- Validate quantity used > 0
     IF p_quantity_used_kg IS NULL OR p_quantity_used_kg <= 0 THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Quantity used must be greater than zero.';
     END IF;
 
-    -- Find delivery by certificate number
-    SELECT delivery_id INTO v_delivery_id
-    FROM Material_Deliveries
-    WHERE certificate_number = p_certificate_number
-    LIMIT 1;
-
-    IF v_delivery_id IS NULL THEN
+    IF p_certificate_number IS NULL OR TRIM(p_certificate_number) = '' THEN
         SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Delivery not found for the given certificate number.';
+        SET MESSAGE_TEXT = 'Certificate number is required.';
     END IF;
-
-    SET @app_user_id = p_user_id;
 
     START TRANSACTION;
 
@@ -1557,10 +1641,29 @@ BEGIN
             SET MESSAGE_TEXT = 'Batch not found.';
         END IF;
 
+        IF fn_user_can_manage_batch(p_user_id, p_batch_number) != 1 THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Permission denied: you cannot manage this batch.';
+        END IF;
+
         IF v_status != 'Pending' THEN
             SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Materials can only be added to Pending batches.';
         END IF;
+
+        -- Serialize allocations to a shared delivery before the trigger sums
+        -- existing usage. Concurrent batches cannot over-consume this delivery.
+        SELECT delivery_id INTO v_delivery_id
+        FROM Material_Deliveries
+        WHERE certificate_number = p_certificate_number
+        FOR UPDATE;
+
+        IF v_delivery_id IS NULL THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Delivery not found for the given certificate number.';
+        END IF;
+
+        SET @app_user_id = p_user_id;
 
         INSERT INTO Batch_Materials (batch_id, delivery_id, quantity_used_kg)
         VALUES (v_batch_id, v_delivery_id, p_quantity_used_kg);
@@ -1593,6 +1696,7 @@ BEGIN
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         GET DIAGNOSTICS CONDITION 1 v_err_msg = MESSAGE_TEXT;
+        SET @app_user_id = NULL;
         ROLLBACK;
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_err_msg;
     END;
@@ -1821,7 +1925,7 @@ UNION ALL
 SELECT
     pb.batch_number,
     f.manufacturer_id,
-    CAST(pb.manufacture_date AS DATETIME) AS event_time,
+    COALESCE(al.logged_at, CAST(pb.manufacture_date AS DATETIME)) AS event_time,
     CONVERT('MATERIAL_LINKED' USING utf8mb4) COLLATE utf8mb4_unicode_ci AS event_type,
     CONVERT(CONCAT('Linked ', bm.quantity_used_kg, ' kg of ', ing.ingredient_name, ' (Cert: ', COALESCE(md.certificate_number, 'N/A'), ') to batch.') USING utf8mb4) COLLATE utf8mb4_unicode_ci AS description
 FROM Batch_Materials bm
@@ -1829,6 +1933,11 @@ JOIN Production_Batches pb   ON pb.batch_id = bm.batch_id
 JOIN Factories f             ON f.factory_id = pb.factory_id
 JOIN Material_Deliveries md  ON md.delivery_id = bm.delivery_id
 JOIN Ingredients ing         ON ing.ingredient_id = md.ingredient_id
+LEFT JOIN Audit_Logs al
+    ON al.table_name = 'Batch_Materials'
+   AND al.action = 'MATERIAL_LINKED'
+   AND al.record_id = bm.batch_id
+   AND al.details LIKE CONCAT('%delivery_id ', bm.delivery_id, ' linked to batch_id ', bm.batch_id, '%')
 
 UNION ALL
 
@@ -1874,7 +1983,7 @@ UNION ALL
 SELECT
     pb.batch_number,
     f.manufacturer_id,
-    CAST(pr.recall_date AS DATETIME) AS event_time,
+    pr.issued_at AS event_time,
     CONVERT('RECALL_ISSUED' USING utf8mb4) COLLATE utf8mb4_unicode_ci AS event_type,
     CONVERT(CONCAT('Batch recalled. Reason: ', pr.reason) USING utf8mb4) COLLATE utf8mb4_unicode_ci AS description
 FROM Product_Recalls pr
@@ -1904,7 +2013,7 @@ SELECT
      FROM Scan_Log sl
      JOIN QR_Codes qr ON qr.qr_id = sl.qr_id
      WHERE qr.batch_id = pb.batch_id
-       AND sl.scanned_at >= CAST(pr.recall_date AS DATETIME)) AS scans_after_recall
+       AND sl.scanned_at >= pr.issued_at) AS scans_after_recall
 FROM Product_Recalls pr
 JOIN Production_Batches pb ON pb.batch_id = pr.batch_id
 JOIN Medicines m           ON m.medicine_id = pb.medicine_id

@@ -28,10 +28,10 @@ data is stored separately; MySQL runs the underlying query each time you
 
 ### v_suspicious_codes
 
-| What it shows | Any QR code that has been scanned **more than 5 times**, with the total scan count and first/last scan timestamps. |
+| What it shows | QR codes scanned **more than 10 times in the rolling 48-hour window**, with the recent scan count and first/last timestamps in that window. |
 |---|---|
-| **Key concept** | **GROUP BY** with **HAVING** (filter after aggregation), **MIN/MAX** aggregates. |
-| **Why it exists** | A code scanned too many times is a sign of counterfeiting — someone may have photocopied the QR code. |
+| **Key concept** | Time-window filtering, **GROUP BY** with **HAVING**, and **MIN/MAX** aggregates. |
+| **Why it exists** | High-frequency scans may indicate a copied code. Analyst review status is separate from the public verification verdict. |
 
 ### v_dashboard
 

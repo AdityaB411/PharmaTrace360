@@ -1,53 +1,54 @@
 -- =============================================================
--- 06_suspicious_review.sql - Migration: Suspicious Scans Review Status
--- PharmaTrace 360 - MySQL 8.0+
--- Adds review_status to Scan_Log, updates v_suspicious_codes,
--- adds stored procedure sp_update_suspicious_review, and grants execution to pt_app.
---
--- Do NOT store passwords or credentials in this file.
+-- 06_suspicious_review.sql - Persistent suspicious-code review status
+-- MySQL 8.0+. Safe to re-run; does not drop or reseed project data.
 -- =============================================================
--- HOW TO RUN (from your own Command Prompt):
---   "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p < "E:\DBMS\PharmaTrace360\db\06_suspicious_review.sql"
--- =============================================================
-
 USE pharmatrace360;
 
--- -------------------------------------------------------------
--- 1. SCHEMA CHANGE: Add review_status to Scan_Log
---    Allowed values: 'New', 'Reviewed', 'Blocked'
---    Default: 'New'
--- -------------------------------------------------------------
-ALTER TABLE Scan_Log
-    ADD COLUMN review_status ENUM('New', 'Reviewed', 'Blocked') NOT NULL DEFAULT 'New';
+SET @has_review_status = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Scan_Log'
+      AND COLUMN_NAME = 'review_status'
+);
+SET @ddl = IF(@has_review_status = 0,
+    'ALTER TABLE Scan_Log ADD COLUMN review_status ENUM(''New'', ''Reviewed'', ''Blocked'') NOT NULL DEFAULT ''New''',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
-CREATE INDEX idx_scan_review_status ON Scan_Log (review_status);
+SET @has_review_index = (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Scan_Log'
+      AND INDEX_NAME = 'idx_scan_review_status'
+);
+SET @ddl = IF(@has_review_index = 0,
+    'CREATE INDEX idx_scan_review_status ON Scan_Log (review_status)',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
--- -------------------------------------------------------------
--- 2. VIEW UPDATE: v_suspicious_codes
---    Exposes the latest review_status alongside aggregated scan metrics.
--- -------------------------------------------------------------
+-- Review status is a code-level analyst decision. A new scan has default
+-- status New but must not erase a previous Reviewed/Blocked decision.
 CREATE OR REPLACE VIEW v_suspicious_codes AS
 SELECT
     sl.scanned_code,
-    COUNT(*)            AS scan_count,
-    MIN(sl.scanned_at)  AS first_scan,
-    MAX(sl.scanned_at)  AS last_scan,
-    (
+    COUNT(*) AS scan_count,
+    MIN(sl.scanned_at) AS first_scan,
+    MAX(sl.scanned_at) AS last_scan,
+    COALESCE((
         SELECT sl2.review_status
         FROM Scan_Log sl2
         WHERE sl2.scanned_code = sl.scanned_code
+          AND sl2.review_status <> 'New'
         ORDER BY sl2.scanned_at DESC, sl2.scan_id DESC
         LIMIT 1
-    )                   AS review_status
+    ), 'New') AS review_status
 FROM Scan_Log sl
+WHERE sl.scanned_at >= NOW() - INTERVAL 48 HOUR
 GROUP BY sl.scanned_code
-HAVING COUNT(*) > 5;
+HAVING COUNT(*) > 10;
 
--- -------------------------------------------------------------
--- 3. STORED PROCEDURE: sp_update_suspicious_review
---    Allows Admin/Regulator to change the review_status of a scanned code.
---    Enforces least privilege, input validation, and audit logging.
--- -------------------------------------------------------------
 DROP PROCEDURE IF EXISTS sp_update_suspicious_review;
 DELIMITER //
 CREATE PROCEDURE sp_update_suspicious_review(
@@ -57,9 +58,9 @@ CREATE PROCEDURE sp_update_suspicious_review(
 )
 BEGIN
     DECLARE v_user_active TINYINT DEFAULT 0;
-    DECLARE v_user_role   VARCHAR(30) DEFAULT '';
-    DECLARE v_count       INT DEFAULT 0;
-    DECLARE v_err_msg     TEXT;
+    DECLARE v_user_role VARCHAR(30) DEFAULT '';
+    DECLARE v_count INT DEFAULT 0;
+    DECLARE v_err_msg TEXT;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -68,7 +69,6 @@ BEGIN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_err_msg;
     END;
 
-    -- Permission check: caller must be an active Admin/Regulator user
     SELECT u.is_active, r.role_name
     INTO v_user_active, v_user_role
     FROM Users u
@@ -80,13 +80,16 @@ BEGIN
         SET MESSAGE_TEXT = 'Permission denied: only active Admin/Regulator users can review suspicious codes.';
     END IF;
 
-    -- Validate input status
-    IF p_status NOT IN ('New', 'Reviewed', 'Blocked') THEN
+    IF p_status IS NULL OR p_status NOT IN ('New', 'Reviewed', 'Blocked') THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Invalid review status. Allowed values: New, Reviewed, Blocked.';
     END IF;
 
-    -- Verify that the code exists in Scan_Log
+    IF p_code IS NULL OR TRIM(p_code) = '' THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Scanned code is required.';
+    END IF;
+
     SELECT COUNT(*) INTO v_count
     FROM Scan_Log
     WHERE scanned_code = p_code;
@@ -96,9 +99,10 @@ BEGIN
         SET MESSAGE_TEXT = 'No scan records found for the specified code.';
     END IF;
 
-    -- Perform atomic update and record audit entry
     START TRANSACTION;
 
+        -- Update every event for this code so an explicit reset to New is
+        -- distinguishable from a newly inserted scan's default New status.
         UPDATE Scan_Log
         SET review_status = p_status
         WHERE scanned_code = p_code;
@@ -118,12 +122,8 @@ BEGIN
 END //
 DELIMITER ;
 
--- -------------------------------------------------------------
--- 4. GRANTS: Least-privilege permissions for pt_app
--- -------------------------------------------------------------
 GRANT EXECUTE ON PROCEDURE pharmatrace360.sp_update_suspicious_review TO 'pt_app'@'localhost';
-GRANT SELECT  ON pharmatrace360.v_suspicious_codes                    TO 'pt_app'@'localhost';
+GRANT SELECT ON pharmatrace360.v_suspicious_codes TO 'pt_app'@'localhost';
 
 FLUSH PRIVILEGES;
-
 SELECT 'Migration 06_suspicious_review.sql successfully applied.' AS status;

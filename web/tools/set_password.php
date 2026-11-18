@@ -55,9 +55,9 @@ $hash = password_hash($password, PASSWORD_DEFAULT);
 // Clean up plaintext password from memory immediately
 unset($password);
 
-// 5. Update password in database via sp_set_password through pt_app connection
+// 5. Update password through the separate CLI-only account
 try {
-    $pdo = dbApp();
+    $pdo = dbSetup();
     $stmt = $pdo->prepare('CALL sp_set_password(?, ?)');
     $stmt->execute([$email, $hash]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
